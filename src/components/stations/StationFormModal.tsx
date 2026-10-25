@@ -176,38 +176,26 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
       return;
     }
 
-    // Determine target organization ID without silent default fallback
-    const targetOrgId = currentUser?.role === 'super_admin'
-      ? selectedOrgId
-      : currentUser?.organization_id;
-
-    if (!targetOrgId) {
-      setServerError(
-        currentUser?.role === 'super_admin'
-          ? 'يجب اختيار الشركة / المؤسسة التابعة لها المحطة قبل الحفظ.'
-          : 'حسابك غير مرتبط بمؤسسة تشغيلية معتمدة. يرجى مراجعة مسؤول المنظومة.'
-      );
-      return;
-    }
-
-    if (isSupabaseConfigured() && currentUser?.role === 'super_admin') {
-      if (!organizations.some((o) => o.id === targetOrgId)) {
-        setServerError('المؤسسة المحددة غير صالحة أو لم يتم تحميلها من قاعدة البيانات بنجاح.');
-        return;
-      }
-    }
+    // Determine target organization ID optionally (centralized architecture allows null or central system)
+    const targetOrgId = selectedOrgId || currentUser?.organization_id || (organizations[0]?.id) || null;
 
     const matchedOrg = organizations.find((o) => o.id === targetOrgId);
     const orgName = matchedOrg
       ? matchedOrg.name
-      : (currentUser?.organization_name || (isSupabaseConfigured() ? 'المؤسسة الوطنية' : DEFAULT_ORGANIZATION.name));
+      : (currentUser?.organization_name || 'المنظومة المركزية لمحطات الطاقة');
 
     setIsSubmitting(true);
 
     try {
+      const cleanData = {
+        ...result.data,
+        latitude: typeof result.data.latitude === 'number' ? result.data.latitude : undefined,
+        longitude: typeof result.data.longitude === 'number' ? result.data.longitude : undefined,
+      };
+
       if (isEditing && initialStation) {
         const updatePayload: Partial<Station> = {
-          ...result.data,
+          ...cleanData,
           ...(currentUser?.role === 'super_admin' ? { organization_id: targetOrgId } : {}),
         };
         const res = await updateStation(initialStation.id, updatePayload);
@@ -217,7 +205,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
         }
       } else {
         const res = await addStation({
-          ...(result.data as Omit<Station, 'id' | 'created_at' | 'updated_at'>),
+          ...(cleanData as Omit<Station, 'id' | 'created_at' | 'updated_at'>),
           organization_id: targetOrgId,
           organization_name: orgName,
           current_load_mw: 0,
@@ -266,22 +254,18 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
         {currentUser?.role === 'super_admin' ? (
           <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-lg">
             <Select
-              label="الشركة أو القطاع التشغيلي التابع له (Organization)"
+              label="الشركة أو القطاع التشغيلي (اختياري)"
               value={selectedOrgId}
               onChange={(e) => setSelectedOrgId(e.target.value)}
-              options={organizations.map((org) => ({
-                value: org.id,
-                label: `${org.name} (${org.code})`,
-              }))}
-              required
-              disabled={isLoadingOrgs || (isSupabaseConfigured() && organizations.length === 0)}
-              helperText={
-                isLoadingOrgs
-                  ? 'جارِ فحص المؤسسات المتاحة في قاعدة البيانات...'
-                  : organizations.length === 0
-                  ? 'لا توجد مؤسسات متاحة حالياً في قاعدة البيانات'
-                  : 'بصفتك مديراً عاماً، حدد المؤسسة المشرفة على المحطة'
-              }
+              options={[
+                { value: '', label: 'المنظومة المركزية الموحدة (افتراضي)' },
+                ...organizations.map((org) => ({
+                  value: org.id,
+                  label: `${org.name} (${org.code})`,
+                })),
+              ]}
+              disabled={isLoadingOrgs}
+              helperText="يمكن إسناد المحطة لقطاع محدد أو إبقاؤها تابعة مباشرة للمنظومة المركزية الموحدة"
             />
           </div>
         ) : (

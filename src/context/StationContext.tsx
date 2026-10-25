@@ -211,7 +211,7 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 code: input.code,
                 name: input.name,
                 type: input.type,
-                organization_id: input.organization_id,
+                organization_id: input.organization_id || null,
                 region_id: null,
                 governorate: input.governorate,
                 address: input.address,
@@ -369,31 +369,9 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return { success: false, error: err };
     }
 
-    // Organizational scope check for admins and supervisors:
-    // Both station and target candidate MUST belong to the user's organization
-    if (role === 'admin' || role === 'supervisor') {
-      if (!currentUser?.organization_id) {
-        const err = 'حسابك غير مرتبط بمؤسسة تشغيلية معتمدة؛ لا يمكن إدارة التكليفات.';
-        showToast('error', err);
-        return { success: false, error: err };
-      }
-
-      if (station.organization_id !== currentUser.organization_id) {
-        const err = 'لا يمكنك تكليف موظفين بمحطات خارج نطاق مؤسستك التشغيلية.';
-        showToast('error', err);
-        return { success: false, error: err };
-      }
-
-      // Check candidate profile organization
-      const targetCandidate = (allProfiles || []).find((p) => p.id === userId);
-      if (targetCandidate && targetCandidate.organization_id !== currentUser.organization_id) {
-        const err = 'لا يمكن تكليف موظف مسجل لدى مؤسسة أخرى أو غير مرتبط بمؤسستك.';
-        showToast('error', err);
-        return { success: false, error: err };
-      }
-    }
-
-    // Supervisor scope check: supervisor can only assign to stations they are actively assigned to
+    // In the centralized architecture:
+    // - super_admin & admin: can assign any candidate to any station in the central network.
+    // - supervisor: can only assign personnel to stations they are actively assigned to.
     if (role === 'supervisor') {
       const isSupervisorAssigned = (currentUser?.assigned_station_ids || []).includes(stationId);
       if (!isSupervisorAssigned) {

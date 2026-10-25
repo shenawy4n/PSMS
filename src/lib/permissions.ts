@@ -14,13 +14,10 @@ export function canCreateStation(role: UserRole): boolean {
 
 /**
  * Checks whether user can edit general station metadata
+ * In the centralized architecture, both super_admin and admin have central access across all stations.
  */
-export function canEditStation(role: UserRole, userOrgId?: string, stationOrgId?: string): boolean {
-  if (role === 'super_admin') return true;
-  if (role === 'admin') {
-    if (!userOrgId || !stationOrgId) return false;
-    return userOrgId === stationOrgId;
-  }
+export function canEditStation(role: UserRole, userOrgId?: string | null, stationOrgId?: string | null): boolean {
+  if (role === 'super_admin' || role === 'admin') return true;
   return false;
 }
 
@@ -59,21 +56,20 @@ export function canViewAuditLogs(role: UserRole): boolean {
 
 /**
  * Checks whether user has permission to view station data
+ * In the centralized architecture:
+ * - super_admin & admin: central system-wide access to all stations
+ * - supervisor & employee: access strictly bounded to explicitly assigned stations
  */
 export function canAccessStation(
   role: UserRole,
   stationId: string,
   userAssignedStationIds: string[],
-  userOrgId?: string,
-  stationOrgId?: string
+  userOrgId?: string | null,
+  stationOrgId?: string | null
 ): boolean {
-  if (role === 'super_admin') return true;
-  if (role === 'admin') {
-    if (!userOrgId || !stationOrgId) return false;
-    return userOrgId === stationOrgId;
-  }
-  // Supervisors and employees can only access stations they are assigned to
-  return userAssignedStationIds.includes(stationId);
+  if (role === 'super_admin' || role === 'admin') return true;
+  // Supervisors and employees can only access stations they are explicitly assigned to
+  return (userAssignedStationIds || []).includes(stationId);
 }
 
 /**

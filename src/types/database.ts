@@ -55,7 +55,7 @@ export interface UserProfile {
   email: string;
   phone?: string;
   role: UserRole;
-  organization_id?: string;
+  organization_id?: string | null;
   organization_name?: string;
   department?: string;
   job_title?: string;
@@ -80,7 +80,7 @@ export interface Station {
   code: string;
   name: string;
   type: StationType;
-  organization_id: string;
+  organization_id?: string | null;
   organization_name?: string;
   region: string;
   governorate: string;

@@ -24,35 +24,28 @@ export const AssignEmployeeModal: React.FC<AssignEmployeeModalProps> = ({
   const { stations, assignEmployee, stationAssignments } = useStations();
   const { allProfiles, role, currentUser } = useAuth();
 
-  // Permitted stations based on role:
-  // - Supervisor can only assign to stations they are actively assigned to
-  // - Admin can only assign to stations in their organization
-  // - Super admin can assign to any station
+  // Permitted stations based on role in the centralized architecture:
+  // - Super admin & Admin: full access to assign across all stations in the central network
+  // - Supervisor: restricted strictly to stations they are actively assigned to
   const permittedStations = useMemo(() => {
-    if (role === 'super_admin') return stations;
-    if (role === 'admin' && currentUser?.organization_id) {
-      return stations.filter((s) => s.organization_id === currentUser.organization_id);
-    }
-    if (role === 'supervisor' && currentUser?.organization_id) {
+    if (role === 'super_admin' || role === 'admin') return stations;
+    if (role === 'supervisor') {
       const assigned = currentUser?.assigned_station_ids || [];
-      return stations.filter(
-        (s) => s.organization_id === currentUser.organization_id && assigned.includes(s.id)
-      );
+      return stations.filter((s) => assigned.includes(s.id));
     }
     return [];
   }, [stations, role, currentUser]);
 
-  // Permitted candidates based on role:
-  // - Admin and Supervisor can only assign non-super-admin employees strictly belonging to their organization
+  // Permitted candidates based on role in the centralized architecture:
+  // - Super admin & Admin: can assign any candidate across the platform
+  // - Supervisor: can assign operational personnel (cannot assign or manage super_admin)
   const permittedProfiles = useMemo(() => {
-    if (role === 'super_admin') return allProfiles;
-    if ((role === 'admin' || role === 'supervisor') && currentUser?.organization_id) {
-      return allProfiles.filter(
-        (p) => p.organization_id === currentUser.organization_id && p.role !== 'super_admin'
-      );
+    if (role === 'super_admin' || role === 'admin') return allProfiles;
+    if (role === 'supervisor') {
+      return allProfiles.filter((p) => p.role !== 'super_admin');
     }
     return [];
-  }, [allProfiles, role, currentUser]);
+  }, [allProfiles, role]);
 
   const [stationId, setStationId] = useState<string>(
     defaultStationId || permittedStations[0]?.id || ''

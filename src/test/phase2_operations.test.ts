@@ -108,13 +108,13 @@ describe('Phase 2: Operational Core & Security Suite', () => {
     });
   });
 
-  describe('Assignment & Organizational Boundary Checks', () => {
-    it('restricts admin from assigning personnel to a station outside their organization', () => {
+  describe('Assignment & Operational Boundary Checks', () => {
+    it('allows central admin to manage stations across the central platform', () => {
       const adminOrg = 'org-central';
       const stationOrg = 'org-western';
 
-      // An admin can only manage/edit within their organization
-      expect(canEditStation('admin', adminOrg, stationOrg)).toBe(false);
+      // In the centralized architecture, admin has central authority across stations
+      expect(canEditStation('admin', adminOrg, stationOrg)).toBe(true);
       expect(canEditStation('admin', adminOrg, adminOrg)).toBe(true);
     });
 

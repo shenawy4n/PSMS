@@ -39,9 +39,9 @@ describe('Role-Based Authorization Architecture', () => {
       expect(canEditStation('super_admin', 'org-1', 'org-2')).toBe(true);
     });
 
-    it('restricts admin to stations within their own organization', () => {
-      expect(canEditStation('admin', 'org-1', 'org-1')).toBe(true);
-      expect(canEditStation('admin', 'org-1', 'org-2')).toBe(false);
+    it('allows admin central authority to edit stations across the platform', () => {
+      expect(canEditStation('admin')).toBe(true);
+      expect(canEditStation('admin', 'org-1', 'org-2')).toBe(true);
     });
 
     it('forbids supervisor and employee from changing core station data', () => {

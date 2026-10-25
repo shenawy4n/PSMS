@@ -38,7 +38,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(isSupabaseMode);
   const [isDemoMode, setIsDemoMode] = useState<boolean>(!isSupabaseMode);
 
-  // Load profiles from Supabase if configured
+  // Request ID sequence counter to discard stale async requests and race conditions
+  const requestIdRef = React.useRef(0);
+  const isMountedRef = React.useRef(true);
+  const currentUserRef = React.useRef<UserProfile | null>(currentUser);
+
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  // Load profiles from Supabase if configured (stable callback without currentUser dependency to eliminate subscription churn)
   const refreshProfiles = useCallback(async () => {
     if (!isSupabaseConfigured()) return;
     const client = getSupabase();
@@ -50,7 +66,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .select('*, station_assignments!station_assignments_user_id_fkey(station_id, is_active)')
         .order('created_at', { ascending: false });
 
-      if (data && !error) {
+      if (data && !error && isMountedRef.current) {
         // Map station assignments to assigned_station_ids
         const mapped: UserProfile[] = data.map((p: any) => ({
           ...p,
@@ -60,18 +76,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }));
         setProfiles(mapped);
 
-        // If currently logged in user is in this list, refresh their profile state
-        if (currentUser) {
-          const freshCurrent = mapped.find((m) => m.id === currentUser.id);
-          if (freshCurrent) {
-            setCurrentUser(freshCurrent);
-          }
-        }
+        // Functional state update avoids tearing down auth listeners
+        setCurrentUser((prev) => {
+          if (!prev) return null;
+          const freshCurrent = mapped.find((m) => m.id === prev.id);
+          return freshCurrent || prev;
+        });
       }
     } catch (err) {
       console.error('Error fetching profiles from Supabase:', err);
     }
-  }, [currentUser]);
+  }, []);
 
   // Sync Supabase Auth session on mount and listen to auth changes
   useEffect(() => {
@@ -86,10 +101,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
+    let authSubscription: { unsubscribe: () => void } | null = null;
+
     // 1. Initial session check
     const initSession = async () => {
+      const reqId = ++requestIdRef.current;
       try {
         const { data: { session }, error } = await client.auth.getSession();
+        if (!isMountedRef.current || reqId !== requestIdRef.current) return;
+
         if (session?.user && !error) {
           const { data: profileData, error: profileError } = await client
             .from('profiles')
@@ -97,13 +117,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             .eq('id', session.user.id)
             .maybeSingle();
 
+          if (!isMountedRef.current || reqId !== requestIdRef.current) return;
+
           if (profileData && !profileError) {
             // Strictly check account active status
             if (!profileData.is_active) {
-              console.warn('Account is deactivated. Signing out immediately.');
-              await client.auth.signOut();
+              console.warn('Account is deactivated. Signing out.');
               setCurrentUser(null);
               setIsDemoMode(false);
+              client.auth.signOut().catch(() => {});
               return;
             }
 
@@ -118,66 +140,102 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
             setIsDemoMode(false);
           } else {
-            // No profile found or DB query failed: reject privileged session
             console.warn('Authenticated user has no matching profile in public.profiles. Signing out.');
-            await client.auth.signOut();
             setCurrentUser(null);
             setIsDemoMode(false);
+            client.auth.signOut().catch(() => {});
           }
         } else {
           setCurrentUser(null);
         }
       } catch (err) {
         console.error('Auth session init error:', err);
-        setCurrentUser(null);
+        if (isMountedRef.current && reqId === requestIdRef.current) {
+          setCurrentUser(null);
+        }
       } finally {
-        setIsLoadingAuth(false);
+        if (isMountedRef.current && reqId === requestIdRef.current) {
+          setIsLoadingAuth(false);
+        }
       }
     };
 
     initSession();
 
-    // 2. Auth State Change Listener
-    const { data: authListener } = client.auth.onAuthStateChange(async (event, session) => {
+    // 2. Auth State Change Listener (Synchronous callback to avoid navigator.locks deadlock)
+    const { data: authListener } = client.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT' || !session) {
+        requestIdRef.current += 1;
         setCurrentUser(null);
         setIsDemoMode(false);
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        const { data: profileData, error: profileErr } = await client
-          .from('profiles')
-          .select('*, station_assignments!station_assignments_user_id_fkey(station_id, is_active)')
-          .eq('id', session.user.id)
-          .maybeSingle();
+        setIsLoadingAuth(false);
+        return;
+      }
 
-        if (profileData && !profileErr) {
-          if (!profileData.is_active) {
-            await client.auth.signOut();
-            setCurrentUser(null);
-            setIsDemoMode(false);
-            return;
-          }
-
-          const assignedIds = (profileData.station_assignments || [])
-            .filter((a: any) => a.is_active)
-            .map((a: any) => a.station_id);
-
-          setCurrentUser({
-            ...profileData,
-            assigned_station_ids: assignedIds,
-          });
-          setIsDemoMode(false);
-        } else {
-          await client.auth.signOut();
-          setCurrentUser(null);
+      if (event === 'TOKEN_REFRESHED') {
+        // If session belongs to already active loaded user, prevent UI interruption
+        if (currentUserRef.current && currentUserRef.current.id === session.user.id) {
+          return;
         }
+      }
+
+      if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') {
+        const reqId = ++requestIdRef.current;
+        // Schedule profile query outside the synchronous Supabase auth event lock
+        setTimeout(async () => {
+          if (!isMountedRef.current || reqId !== requestIdRef.current) return;
+          try {
+            const { data: profileData, error: profileErr } = await client
+              .from('profiles')
+              .select('*, station_assignments!station_assignments_user_id_fkey(station_id, is_active)')
+              .eq('id', session.user.id)
+              .maybeSingle();
+
+            if (!isMountedRef.current || reqId !== requestIdRef.current) return;
+
+            if (profileData && !profileErr) {
+              if (!profileData.is_active) {
+                setCurrentUser(null);
+                setIsDemoMode(false);
+                setIsLoadingAuth(false);
+                client.auth.signOut().catch(() => {});
+                return;
+              }
+
+              const assignedIds = (profileData.station_assignments || [])
+                .filter((a: any) => a.is_active)
+                .map((a: any) => a.station_id);
+
+              setCurrentUser({
+                ...profileData,
+                assigned_station_ids: assignedIds,
+              });
+              setIsDemoMode(false);
+              setIsLoadingAuth(false);
+            } else {
+              setCurrentUser(null);
+              setIsDemoMode(false);
+              setIsLoadingAuth(false);
+              client.auth.signOut().catch(() => {});
+            }
+          } catch (err) {
+            console.error('Error in onAuthStateChange profile load:', err);
+            if (isMountedRef.current && reqId === requestIdRef.current) {
+              setCurrentUser(null);
+              setIsLoadingAuth(false);
+            }
+          }
+        }, 0);
       }
     });
 
-    // Load initial profiles list
+    authSubscription = authListener?.subscription;
+
+    // Load initial profiles list once
     refreshProfiles();
 
     return () => {
-      authListener?.subscription.unsubscribe();
+      authSubscription?.unsubscribe();
     };
   }, [isSupabaseMode, refreshProfiles]);
 
@@ -297,14 +355,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
+    // 1. Immediately invalidate in-flight queries and clear local authentication state
+    requestIdRef.current += 1;
+    setCurrentUser(null);
+    setIsDemoMode(false);
+    setIsLoadingAuth(false);
+
+    // 2. Perform Supabase remote sign out safely without throwing unhandled rejection on network or token errors
     if (isSupabaseMode && !isDemoMode) {
       const client = getSupabase();
       if (client) {
-        await client.auth.signOut();
+        try {
+          await client.auth.signOut();
+        } catch (err) {
+          console.warn('Supabase remote sign out warning (handled gracefully):', err);
+        }
       }
     }
-    setCurrentUser(null);
-    setIsDemoMode(false);
   };
 
   const createEmployeeProfile = async (
