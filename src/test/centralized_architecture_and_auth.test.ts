@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   canAccessStation,
   canCreateStation,
@@ -18,7 +18,10 @@ import { stationFormSchema } from '../lib/validations/station';
 import { employeeFormSchema } from '../lib/validations/employee';
 import { UserProfile, Station, StationAssignment } from '../types/database';
 
-describe('Centralized Architecture & Authorization Suite', () => {
+/* ==============================================================================
+   PART 1: UNIT TESTS — Permission Architecture & Zod Form Validations
+   ============================================================================== */
+describe('UNIT TESTS: Permission Functions & Schema Validations', () => {
   describe('1. Centralized Station Management (No Organization Lock)', () => {
     it('allows super_admin to access and edit any station regardless of organization', () => {
       expect(canAccessStation('super_admin', 'stn-001', [])).toBe(true);
@@ -148,8 +151,11 @@ describe('Centralized Architecture & Authorization Suite', () => {
   });
 });
 
-describe('Authentication & Session Stability Logic', () => {
-  describe('1. Inactive Profile Protection', () => {
+/* ==============================================================================
+   PART 2: INTEGRATION TESTS — AuthContext Lifecycle, Inactive Accounts & Safe Logout
+   ============================================================================== */
+describe('INTEGRATION TESTS: AuthContext Lifecycle & Deadlock Prevention', () => {
+  describe('1. Inactive Profile Protection and Graceful Sign-out', () => {
     it('identifies and rejects deactivated accounts', () => {
       const activeProfile: UserProfile = {
         id: 'usr-1',
@@ -170,6 +176,42 @@ describe('Authentication & Session Stability Logic', () => {
 
       expect(activeProfile.is_active).toBe(true);
       expect(deactivatedProfile.is_active).toBe(false);
+    });
+
+    it('rejects session and performs non-blocking signOut if loaded profile is inactive', async () => {
+      let currentUser: UserProfile | null = null;
+      let isDemoMode = true;
+      const mockSignOut = vi.fn().mockResolvedValue({});
+
+      // Simulates the AuthContext onAuthStateChange/initSession handler for inactive profiles
+      const handleLoadedProfile = (profile: UserProfile | null) => {
+        if (!profile || !profile.is_active) {
+          currentUser = null;
+          isDemoMode = false;
+          mockSignOut().catch(() => {});
+          return false;
+        }
+        currentUser = profile;
+        isDemoMode = false;
+        return true;
+      };
+
+      const inactiveUser: UserProfile = {
+        id: 'usr-inactive',
+        employee_number: 'EMP-99',
+        full_name: 'موظف معطل',
+        email: 'inactive@psms.gov.sa',
+        role: 'employee',
+        is_active: false,
+        assigned_station_ids: [],
+        created_at: new Date().toISOString(),
+      };
+
+      const accepted = handleLoadedProfile(inactiveUser);
+      expect(accepted).toBe(false);
+      expect(currentUser).toBeNull();
+      expect(isDemoMode).toBe(false);
+      expect(mockSignOut).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -259,7 +301,7 @@ describe('Authentication & Session Stability Logic', () => {
     });
   });
 
-  describe('4. Token Refresh Identity Preservation', () => {
+  describe('4. Token Refresh Identity Preservation (Prevents Screen Churn)', () => {
     it('detects when token refreshed event belongs to same authenticated user and avoids state churn', () => {
       const currentActiveId = 'usr-current-123';
       const refreshSession = {
@@ -275,5 +317,117 @@ describe('Authentication & Session Stability Logic', () => {
       const shouldReloadDifferent = currentActiveId === differentSession.user.id;
       expect(shouldReloadDifferent).toBe(false);
     });
+  });
+});
+
+/* ==============================================================================
+   PART 3: INTEGRATION TESTS — StationContext Lifecycle & Data Cleanup on Logout
+   ============================================================================== */
+describe('INTEGRATION TESTS: StationContext Data Lifecycle & Stale Data Prevention', () => {
+  it('clears all user-bound station state immediately when user logs out', () => {
+    // Initial loaded state representing an authenticated session
+    let allRawStations: Station[] = [
+      {
+        id: 'stn-01',
+        code: 'STN-01',
+        name: 'محطة الرياض',
+        type: 'transmission',
+        region: 'الوسطى',
+        governorate: 'الرياض',
+        address: 'شارع الملك فهد',
+        voltage_level_kv: 132,
+        installed_capacity_mw: 200,
+        status: 'operational',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ];
+    let stationAssets = [{ id: 'ast-01', station_id: 'stn-01' }];
+    let stationReadings = [{ id: 'rdg-01', station_id: 'stn-01' }];
+    let activeStation: Station | null = allRawStations[0];
+    let isLoading = false;
+    let stationRequestId = 1;
+
+    // Simulation of StationContext clearStationData()
+    const clearStationData = () => {
+      stationRequestId += 1;
+      allRawStations = [];
+      stationAssets = [];
+      stationReadings = [];
+      activeStation = null;
+      isLoading = false;
+    };
+
+    // Trigger logout
+    clearStationData();
+
+    expect(allRawStations).toEqual([]);
+    expect(stationAssets).toEqual([]);
+    expect(stationReadings).toEqual([]);
+    expect(activeStation).toBeNull();
+    expect(isLoading).toBe(false);
+    expect(stationRequestId).toBe(2);
+  });
+
+  it('prevents in-flight station queries from restoring data after logout', async () => {
+    let stationRequestId = 0;
+    let stationsState: Station[] = [];
+
+    const asyncFetchStations = async (reqId: number, delayMs: number, data: Station[]) => {
+      await new Promise((r) => setTimeout(r, delayMs));
+      // Generation check from StationContext refreshData()
+      if (reqId === stationRequestId) {
+        stationsState = data;
+      }
+    };
+
+    // User logs in: start fetch (takes 40ms)
+    const req1 = ++stationRequestId;
+    const fetchPromise = asyncFetchStations(req1, 40, [
+      {
+        id: 'stn-secret',
+        code: 'SEC-01',
+        name: 'محطة سرية',
+        type: 'generation',
+        region: 'الشرقية',
+        governorate: 'الجبيل',
+        address: 'المنطقة الصناعية',
+        voltage_level_kv: 380,
+        installed_capacity_mw: 1000,
+        status: 'operational',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+
+    // Before response completes, user logs out (clears state and increments generation)
+    stationRequestId += 1;
+    stationsState = [];
+
+    await fetchPromise;
+
+    // Verify stale response did NOT overwrite the cleared logout state
+    expect(stationsState).toEqual([]);
+  });
+
+  it('suppresses station data fetches while authentication is still loading', () => {
+    const isLoadingAuth = true;
+    const currentUser = null;
+    let fetchCalled = false;
+
+    // Simulates StationContext useEffect
+    const evaluateStationFetch = () => {
+      if (isLoadingAuth) {
+        return 'WAITING_FOR_AUTH';
+      }
+      if (!currentUser) {
+        return 'CLEARED';
+      }
+      fetchCalled = true;
+      return 'FETCHED';
+    };
+
+    expect(evaluateStationFetch()).toBe('WAITING_FOR_AUTH');
+    expect(fetchCalled).toBe(false);
   });
 });

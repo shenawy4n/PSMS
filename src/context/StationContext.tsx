@@ -63,17 +63,30 @@ interface StationContextType {
 const StationContext = createContext<StationContextType | undefined>(undefined);
 
 export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser, role, refreshProfiles, allProfiles } = useAuth();
-  const [allRawStations, setAllRawStations] = useState<Station[]>(INITIAL_STATIONS);
-  const [stationAssets, setStationAssets] = useState<StationAsset[]>(INITIAL_ASSETS);
-  const [stationReadings, setStationReadings] = useState<StationReading[]>(INITIAL_READINGS);
-  const [faultReports, setFaultReports] = useState<FaultReport[]>(INITIAL_FAULTS);
-  const [maintenanceOrders, setMaintenanceOrders] = useState<MaintenanceOrder[]>(INITIAL_MAINTENANCE);
-  const [stationAssignments, setStationAssignments] = useState<StationAssignment[]>(INITIAL_ASSIGNMENTS);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(INITIAL_AUDIT_LOGS);
-  const [activeStation, setActiveStation] = useState<Station | null>(INITIAL_STATIONS[0]);
+  const { currentUser, role, refreshProfiles, allProfiles, isLoadingAuth, isDemoMode } = useAuth();
+  const isSupabaseMode = isSupabaseConfigured() && !isDemoMode;
+
+  const [allRawStations, setAllRawStations] = useState<Station[]>(isSupabaseMode ? [] : INITIAL_STATIONS);
+  const [stationAssets, setStationAssets] = useState<StationAsset[]>(isSupabaseMode ? [] : INITIAL_ASSETS);
+  const [stationReadings, setStationReadings] = useState<StationReading[]>(isSupabaseMode ? [] : INITIAL_READINGS);
+  const [faultReports, setFaultReports] = useState<FaultReport[]>(isSupabaseMode ? [] : INITIAL_FAULTS);
+  const [maintenanceOrders, setMaintenanceOrders] = useState<MaintenanceOrder[]>(isSupabaseMode ? [] : INITIAL_MAINTENANCE);
+  const [stationAssignments, setStationAssignments] = useState<StationAssignment[]>(isSupabaseMode ? [] : INITIAL_ASSIGNMENTS);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(isSupabaseMode ? [] : INITIAL_AUDIT_LOGS);
+  const [activeStation, setActiveStation] = useState<Station | null>(isSupabaseMode ? null : INITIAL_STATIONS[0]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [toast, setToast] = useState<ToastNotification | null>(null);
+
+  // Request counter ref to prevent race conditions from out-of-order responses
+  const stationRequestIdRef = React.useRef(0);
+  const isMountedRef = React.useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const showToast = useCallback((type: 'success' | 'error' | 'info', message: string) => {
     setToast({ type, message });
@@ -86,19 +99,53 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setToast(null);
   }, []);
 
-  // Supabase Data Refresh
+  // Clear all station data and invalidate in-flight queries
+  const clearStationData = useCallback(() => {
+    stationRequestIdRef.current += 1;
+    if (isSupabaseConfigured() && !isDemoMode) {
+      setAllRawStations([]);
+      setStationAssets([]);
+      setStationReadings([]);
+      setFaultReports([]);
+      setMaintenanceOrders([]);
+      setStationAssignments([]);
+      setAuditLogs([]);
+      setActiveStation(null);
+    } else {
+      setAllRawStations(INITIAL_STATIONS);
+      setStationAssets(INITIAL_ASSETS);
+      setStationReadings(INITIAL_READINGS);
+      setFaultReports(INITIAL_FAULTS);
+      setMaintenanceOrders(INITIAL_MAINTENANCE);
+      setStationAssignments(INITIAL_ASSIGNMENTS);
+      setAuditLogs(INITIAL_AUDIT_LOGS);
+      setActiveStation(INITIAL_STATIONS[0]);
+    }
+    setIsLoading(false);
+  }, [isDemoMode]);
+
+  // Supabase Data Refresh with request sequence checking
   const refreshData = useCallback(async () => {
-    if (!isSupabaseConfigured()) return;
+    if (!isSupabaseConfigured() || isDemoMode) return;
     const client = getSupabase();
     if (!client) return;
 
+    if (!currentUser) {
+      clearStationData();
+      return;
+    }
+
+    const reqId = ++stationRequestIdRef.current;
     setIsLoading(true);
+
     try {
       // 1. Fetch stations
       const { data: dbStations, error: stnError } = await client
         .from('stations')
         .select('*, organizations(id, code, name)')
         .order('created_at', { ascending: false });
+
+      if (!isMountedRef.current || reqId !== stationRequestIdRef.current) return;
 
       if (dbStations && !stnError) {
         const mapped: Station[] = dbStations.map((s: any) => ({
@@ -114,12 +161,12 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
         .select('*')
         .order('assigned_at', { ascending: false });
 
-      if (dbAssignments) {
-        setStationAssignments(dbAssignments);
-      }
+      if (!isMountedRef.current || reqId !== stationRequestIdRef.current) return;
+      if (dbAssignments) setStationAssignments(dbAssignments);
 
       // 3. Fetch assets
       const { data: dbAssets } = await client.from('station_assets').select('*');
+      if (!isMountedRef.current || reqId !== stationRequestIdRef.current) return;
       if (dbAssets) setStationAssets(dbAssets);
 
       // 4. Fetch readings
@@ -127,6 +174,7 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
         .from('station_readings')
         .select('*')
         .order('reading_timestamp', { ascending: false });
+      if (!isMountedRef.current || reqId !== stationRequestIdRef.current) return;
       if (dbReadings) setStationReadings(dbReadings);
 
       // 5. Fetch faults
@@ -134,10 +182,12 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
         .from('fault_reports')
         .select('*')
         .order('occurred_at', { ascending: false });
+      if (!isMountedRef.current || reqId !== stationRequestIdRef.current) return;
       if (dbFaults) setFaultReports(dbFaults);
 
       // 6. Fetch maintenance orders
       const { data: dbOrders } = await client.from('maintenance_orders').select('*');
+      if (!isMountedRef.current || reqId !== stationRequestIdRef.current) return;
       if (dbOrders) setMaintenanceOrders(dbOrders);
 
       // 7. Fetch audit logs
@@ -146,17 +196,30 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
         .select('*')
         .order('created_at', { ascending: false })
         .limit(100);
+      if (!isMountedRef.current || reqId !== stationRequestIdRef.current) return;
       if (dbLogs) setAuditLogs(dbLogs);
     } catch (err) {
       console.error('Error fetching Supabase records in StationContext:', err);
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current && reqId === stationRequestIdRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, []);
+  }, [currentUser, isDemoMode, clearStationData]);
 
+  // Synchronize data strictly when authentication settles or user changes
   useEffect(() => {
+    if (isLoadingAuth) {
+      return; // Do not fetch before authentication is settled
+    }
+
+    if (!currentUser) {
+      clearStationData();
+      return;
+    }
+
     refreshData();
-  }, [refreshData]);
+  }, [currentUser?.id, isLoadingAuth, refreshData, clearStationData]);
 
   // Authorization Scoping: Filter visible stations according to role and assignment
   const visibleStations = useMemo(() => {
@@ -178,6 +241,19 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setActiveStation(found);
     }
   };
+
+  // Keep activeStation aligned with authorized stations
+  useEffect(() => {
+    if (!currentUser) {
+      setActiveStation(null);
+      return;
+    }
+    if (!activeStation && visibleStations.length > 0) {
+      setActiveStation(visibleStations[0]);
+    } else if (activeStation && !visibleStations.some((s) => s.id === activeStation.id)) {
+      setActiveStation(visibleStations[0] || null);
+    }
+  }, [currentUser, visibleStations, activeStation]);
 
   // 1. Add Station
   const addStation = async (input: Omit<Station, 'id' | 'created_at' | 'updated_at'>) => {

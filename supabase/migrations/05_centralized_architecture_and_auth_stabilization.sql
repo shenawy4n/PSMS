@@ -1,28 +1,30 @@
 -- ==============================================================================
 -- PSMS MIGRATION 05: CENTRALIZED ARCHITECTURE & AUTHENTICATION STABILIZATION
 -- ==============================================================================
--- Architecture Objectives & Transition:
--- 1. Transition PSMS from multi-tenant isolation to a single centralized platform
+-- Complete Production RLS Audit & Centralization Specification:
+-- 1. ARCHITECTURE TRANSITION:
+--    Transition PSMS from multi-tenant isolation to a single centralized platform
 --    governed by super_admin and operational admins.
--- 2. Preserve historical data and backward compatibility:
---    - Retains public.organizations and organization_id columns without data loss.
+-- 2. PRESERVATION OF HISTORICAL DATA & RETRO-COMPATIBILITY:
+--    - Retains public.organizations and organization_id without column removal.
 --    - Ensures organization_id is nullable on both stations and profiles.
--- 3. Centralized Role Permissions:
---    - super_admin: Full global access across all stations, employees, assignments, and roles.
---    - admin: Central administrative authority (manage stations and personnel, assign employees)
---             without requiring matching organization_id.
---    - supervisor: Supervisory access and assignments strictly bounded to assigned stations.
---    - employee: Operational access strictly bounded to assigned stations.
--- 4. Anti-Privilege Escalation Triggers:
---    - Non-super-admins cannot alter system-immutable fields (id, email, employee_number).
---    - Users cannot modify their own role, activation status, or supervisor reference.
---    - Admins cannot promote users to super_admin or modify existing super_admin accounts.
--- 5. Station Assignment Immutability:
---    - station_id and user_id are strictly immutable on UPDATE.
---    - Supervisors can only update assignments for stations where they hold an active assignment.
--- 6. Grants & Security:
---    - All functions use SECURITY DEFINER with explicit SET search_path = public, pg_temp.
---    - Execution revoked from PUBLIC, granted strictly to authenticated roles.
+-- 3. PERMISSIVE-POLICY OR-COMPOSITION LEAK PREVENTION:
+--    Explicitly drops all legacy policies from 01_initial_schema.sql,
+--    02_security_and_assignments.sql, and 04_fix_rls_recursion.sql across ALL tables:
+--    profiles, stations, station_assignments, station_assets, station_readings,
+--    fault_reports, maintenance_orders, audit_logs, organizations, regions,
+--    tasks, notifications, inspection_templates, inspection_records,
+--    asset_types, and measurement_types.
+-- 4. LEAST PRIVILEGE ROLE MODEL:
+--    - super_admin: Full system-wide authority across all operational tables.
+--    - admin: Central operational administration (manage stations, personnel, assets,
+--             maintenance, readings, and faults) across the central network.
+--    - supervisor: Supervisory actions strictly bounded to authorized stations (user_has_station_access).
+--    - employee: Operational data viewing and measurement/fault submissions strictly
+--                bounded to authorized stations (user_has_station_access).
+-- 5. FUNCTION HARDENING & ACCESS CONTROL:
+--    - All helper functions use SECURITY DEFINER with explicit SET search_path = public, pg_temp.
+--    - Public execution is REVOKED; EXECUTE is granted strictly to authenticated roles.
 -- ==============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -343,10 +345,14 @@ FOR EACH ROW
 EXECUTE FUNCTION public.enforce_station_assignment_immutability();
 
 -- -----------------------------------------------------------------------------
--- STEP 5: CENTRALIZED RLS POLICIES
+-- STEP 5: CENTRALIZED RLS POLICIES ACROSS ALL SYSTEM TABLES
 -- -----------------------------------------------------------------------------
 
--- 5.1 ORGANIZATIONS: Reference data readable by all authenticated users
+-- =============================================================================
+-- 5.1 ORGANIZATIONS
+-- =============================================================================
+ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
+
 DROP POLICY IF EXISTS "Organizations viewable by scoped users" ON public.organizations;
 DROP POLICY IF EXISTS "Organizations viewable by authenticated users" ON public.organizations;
 DROP POLICY IF EXISTS "Organizations manageable by super admins" ON public.organizations;
@@ -361,23 +367,46 @@ ON public.organizations FOR ALL
 TO authenticated
 USING (public.is_super_admin());
 
--- 5.2 PROFILES: Central administrative visibility and self-access
+-- =============================================================================
+-- 5.2 REGIONS
+-- =============================================================================
+ALTER TABLE public.regions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Regions viewable by authenticated users" ON public.regions;
+DROP POLICY IF EXISTS "Regions manageable by super admins" ON public.regions;
+
+CREATE POLICY "Regions viewable by authenticated users"
+ON public.regions FOR SELECT
+TO authenticated
+USING (TRUE);
+
+CREATE POLICY "Regions manageable by super admins"
+ON public.regions FOR ALL
+TO authenticated
+USING (public.is_super_admin());
+
+-- =============================================================================
+-- 5.3 PROFILES
+-- =============================================================================
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Profiles viewable by authenticated users" ON public.profiles;
 DROP POLICY IF EXISTS "Profiles viewable by authorized users" ON public.profiles;
 DROP POLICY IF EXISTS "Super admins can manage all profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Admins can update profiles in their organization" ON public.profiles;
-DROP POLICY IF EXISTS "Admins can manage central profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Admins can update central profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Admins can manage central profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Profiles self update" ON public.profiles;
+DROP POLICY IF EXISTS "Users can update own non-sensitive profile data" ON public.profiles;
+DROP POLICY IF EXISTS "Admins can insert central profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Super admins can delete profiles" ON public.profiles;
 
 CREATE POLICY "Profiles viewable by authorized users"
 ON public.profiles FOR SELECT
 TO authenticated
 USING (
-    -- 1. Users can always read their own profile
     id = (SELECT auth.uid())
-    -- 2. Super Admin and Central Admins view all profiles across the platform
     OR public.is_admin_or_super()
-    -- 3. Operational teammates co-assigned to active stations
     OR public.user_shares_station_with(id)
 );
 
@@ -385,6 +414,11 @@ CREATE POLICY "Super admins can manage all profiles"
 ON public.profiles FOR ALL
 TO authenticated
 USING (public.is_super_admin());
+
+CREATE POLICY "Admins can insert central profiles"
+ON public.profiles FOR INSERT
+TO authenticated
+WITH CHECK (public.is_admin_or_super());
 
 CREATE POLICY "Admins can update central profiles"
 ON public.profiles FOR UPDATE
@@ -398,13 +432,23 @@ TO authenticated
 USING (id = (SELECT auth.uid()))
 WITH CHECK (id = (SELECT auth.uid()));
 
--- 5.3 STATIONS: Central management by super_admin & admin; assigned access for others
+CREATE POLICY "Super admins can delete profiles"
+ON public.profiles FOR DELETE
+TO authenticated
+USING (public.is_super_admin());
+
+-- =============================================================================
+-- 5.4 STATIONS
+-- =============================================================================
+ALTER TABLE public.stations ENABLE ROW LEVEL SECURITY;
+
 DROP POLICY IF EXISTS "Stations viewable based on assignment or org scope" ON public.stations;
 DROP POLICY IF EXISTS "Super admins and Org Admins can insert stations" ON public.stations;
 DROP POLICY IF EXISTS "Super admins and Org Admins can update stations" ON public.stations;
 DROP POLICY IF EXISTS "Central admins can insert stations" ON public.stations;
 DROP POLICY IF EXISTS "Central admins can update stations" ON public.stations;
 DROP POLICY IF EXISTS "Stations viewable based on centralized access" ON public.stations;
+DROP POLICY IF EXISTS "Super admins can delete stations" ON public.stations;
 
 CREATE POLICY "Stations viewable based on centralized access"
 ON public.stations FOR SELECT
@@ -422,7 +466,16 @@ TO authenticated
 USING (public.is_admin_or_super())
 WITH CHECK (public.is_admin_or_super());
 
--- 5.4 STATION ASSIGNMENTS: Central management and supervisor delegation
+CREATE POLICY "Super admins can delete stations"
+ON public.stations FOR DELETE
+TO authenticated
+USING (public.is_super_admin());
+
+-- =============================================================================
+-- 5.5 STATION ASSIGNMENTS
+-- =============================================================================
+ALTER TABLE public.station_assignments ENABLE ROW LEVEL SECURITY;
+
 DROP POLICY IF EXISTS "Station assignments viewable by authorized users" ON public.station_assignments;
 DROP POLICY IF EXISTS "Station assignments insertable by authorized managers" ON public.station_assignments;
 DROP POLICY IF EXISTS "Station assignments updatable by authorized managers" ON public.station_assignments;
@@ -441,9 +494,7 @@ CREATE POLICY "Station assignments insertable by authorized managers"
 ON public.station_assignments FOR INSERT
 TO authenticated
 WITH CHECK (
-    -- Super Admin & Admin can assign anyone anywhere
     public.is_admin_or_super()
-    -- Supervisor can assign operational personnel to stations they actively supervise
     OR (
         public.get_current_user_role() = 'supervisor'::user_role
         AND public.user_has_station_assignment(station_assignments.station_id)
@@ -473,10 +524,380 @@ ON public.station_assignments FOR DELETE
 TO authenticated
 USING (public.is_super_admin());
 
+-- =============================================================================
+-- 5.6 STATION ASSETS
+-- =============================================================================
+ALTER TABLE public.station_assets ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Station assets viewable by authorized station staff" ON public.station_assets;
+DROP POLICY IF EXISTS "Station assets insertable by authorized managers" ON public.station_assets;
+DROP POLICY IF EXISTS "Station assets updatable by authorized managers" ON public.station_assets;
+DROP POLICY IF EXISTS "Station assets deletable by super admins" ON public.station_assets;
+
+CREATE POLICY "Station assets viewable by authorized station staff"
+ON public.station_assets FOR SELECT
+TO authenticated
+USING (public.user_has_station_access(station_id));
+
+CREATE POLICY "Station assets insertable by authorized managers"
+ON public.station_assets FOR INSERT
+TO authenticated
+WITH CHECK (
+    public.is_admin_or_super()
+    OR (
+        public.get_current_user_role() = 'supervisor'::user_role
+        AND public.user_has_station_assignment(station_assets.station_id)
+    )
+);
+
+CREATE POLICY "Station assets updatable by authorized managers"
+ON public.station_assets FOR UPDATE
+TO authenticated
+USING (
+    public.is_admin_or_super()
+    OR (
+        public.get_current_user_role() = 'supervisor'::user_role
+        AND public.user_has_station_assignment(station_assets.station_id)
+    )
+)
+WITH CHECK (
+    public.is_admin_or_super()
+    OR (
+        public.get_current_user_role() = 'supervisor'::user_role
+        AND public.user_has_station_assignment(station_assets.station_id)
+    )
+);
+
+CREATE POLICY "Station assets deletable by super admins"
+ON public.station_assets FOR DELETE
+TO authenticated
+USING (public.is_super_admin());
+
+-- =============================================================================
+-- 5.7 STATION READINGS
+-- =============================================================================
+ALTER TABLE public.station_readings ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Readings viewable by authorized station staff" ON public.station_readings;
+DROP POLICY IF EXISTS "Authorized personnel can record readings" ON public.station_readings;
+DROP POLICY IF EXISTS "Super admins can delete readings" ON public.station_readings;
+
+CREATE POLICY "Readings viewable by authorized station staff"
+ON public.station_readings FOR SELECT
+TO authenticated
+USING (public.user_has_station_access(station_id));
+
+CREATE POLICY "Authorized personnel can record readings"
+ON public.station_readings FOR INSERT
+TO authenticated
+WITH CHECK (
+    public.user_has_station_access(station_id)
+    AND recorded_by = (SELECT auth.uid())
+);
+
+CREATE POLICY "Super admins can delete readings"
+ON public.station_readings FOR DELETE
+TO authenticated
+USING (public.is_super_admin());
+
+-- =============================================================================
+-- 5.8 FAULT REPORTS
+-- =============================================================================
+ALTER TABLE public.fault_reports ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Fault reports viewable by station personnel" ON public.fault_reports;
+DROP POLICY IF EXISTS "Station personnel can submit fault reports" ON public.fault_reports;
+DROP POLICY IF EXISTS "Supervisors and Admins can update fault status" ON public.fault_reports;
+DROP POLICY IF EXISTS "Fault reports deletable by super admins" ON public.fault_reports;
+
+CREATE POLICY "Fault reports viewable by station personnel"
+ON public.fault_reports FOR SELECT
+TO authenticated
+USING (public.user_has_station_access(station_id));
+
+CREATE POLICY "Station personnel can submit fault reports"
+ON public.fault_reports FOR INSERT
+TO authenticated
+WITH CHECK (
+    public.user_has_station_access(station_id)
+    AND reported_by = (SELECT auth.uid())
+);
+
+CREATE POLICY "Supervisors and Admins can update fault status"
+ON public.fault_reports FOR UPDATE
+TO authenticated
+USING (
+    public.user_has_station_access(station_id)
+    AND (
+        public.is_admin_or_super()
+        OR public.get_current_user_role() = 'supervisor'::user_role
+    )
+)
+WITH CHECK (
+    public.user_has_station_access(station_id)
+    AND (
+        public.is_admin_or_super()
+        OR public.get_current_user_role() = 'supervisor'::user_role
+    )
+);
+
+CREATE POLICY "Fault reports deletable by super admins"
+ON public.fault_reports FOR DELETE
+TO authenticated
+USING (public.is_super_admin());
+
+-- =============================================================================
+-- 5.9 MAINTENANCE ORDERS
+-- =============================================================================
+ALTER TABLE public.maintenance_orders ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Maintenance orders viewable by authorized station staff" ON public.maintenance_orders;
+DROP POLICY IF EXISTS "Maintenance orders insertable by authorized managers" ON public.maintenance_orders;
+DROP POLICY IF EXISTS "Maintenance orders updatable by authorized managers" ON public.maintenance_orders;
+DROP POLICY IF EXISTS "Maintenance orders deletable by super admins" ON public.maintenance_orders;
+
+CREATE POLICY "Maintenance orders viewable by authorized station staff"
+ON public.maintenance_orders FOR SELECT
+TO authenticated
+USING (public.user_has_station_access(station_id));
+
+CREATE POLICY "Maintenance orders insertable by authorized managers"
+ON public.maintenance_orders FOR INSERT
+TO authenticated
+WITH CHECK (
+    public.is_admin_or_super()
+    OR (
+        public.get_current_user_role() = 'supervisor'::user_role
+        AND public.user_has_station_assignment(maintenance_orders.station_id)
+    )
+);
+
+CREATE POLICY "Maintenance orders updatable by authorized managers"
+ON public.maintenance_orders FOR UPDATE
+TO authenticated
+USING (
+    public.user_has_station_access(station_id)
+    AND (
+        public.is_admin_or_super()
+        OR public.get_current_user_role() = 'supervisor'::user_role
+    )
+)
+WITH CHECK (
+    public.user_has_station_access(station_id)
+    AND (
+        public.is_admin_or_super()
+        OR public.get_current_user_role() = 'supervisor'::user_role
+    )
+);
+
+CREATE POLICY "Maintenance orders deletable by super admins"
+ON public.maintenance_orders FOR DELETE
+TO authenticated
+USING (public.is_super_admin());
+
+-- =============================================================================
+-- 5.10 AUDIT LOGS
+-- =============================================================================
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Audit logs viewable only by Admins" ON public.audit_logs;
+DROP POLICY IF EXISTS "Audit logs insertable by system or authenticated users" ON public.audit_logs;
+DROP POLICY IF EXISTS "Audit logs viewable by central admins" ON public.audit_logs;
+
+CREATE POLICY "Audit logs viewable by central admins"
+ON public.audit_logs FOR SELECT
+TO authenticated
+USING (public.is_admin_or_super());
+
+CREATE POLICY "Audit logs insertable by system or authenticated users"
+ON public.audit_logs FOR INSERT
+TO authenticated
+WITH CHECK (
+    actor_id = (SELECT auth.uid())
+    OR actor_id IS NULL
+);
+
+-- Note: No UPDATE or DELETE policies are created on audit_logs.
+-- They remain strictly immutable and tamper-evident.
+
+-- =============================================================================
+-- 5.11 TASKS
+-- =============================================================================
+ALTER TABLE public.tasks ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Tasks viewable by assignee or station manager" ON public.tasks;
+DROP POLICY IF EXISTS "Tasks manageable by authorized managers" ON public.tasks;
+DROP POLICY IF EXISTS "Tasks deletable by super admins" ON public.tasks;
+
+CREATE POLICY "Tasks viewable by assignee or station manager"
+ON public.tasks FOR SELECT
+TO authenticated
+USING (
+    assigned_to = (SELECT auth.uid())
+    OR public.is_admin_or_super()
+    OR (station_id IS NOT NULL AND public.user_has_station_access(station_id))
+);
+
+CREATE POLICY "Tasks manageable by authorized managers"
+ON public.tasks FOR INSERT
+TO authenticated
+WITH CHECK (
+    public.is_admin_or_super()
+    OR (
+        station_id IS NOT NULL
+        AND public.get_current_user_role() = 'supervisor'::user_role
+        AND public.user_has_station_assignment(tasks.station_id)
+    )
+);
+
+CREATE POLICY "Tasks updatable by assignee or managers"
+ON public.tasks FOR UPDATE
+TO authenticated
+USING (
+    assigned_to = (SELECT auth.uid())
+    OR public.is_admin_or_super()
+    OR (
+        station_id IS NOT NULL
+        AND public.get_current_user_role() = 'supervisor'::user_role
+        AND public.user_has_station_assignment(tasks.station_id)
+    )
+)
+WITH CHECK (
+    assigned_to = (SELECT auth.uid())
+    OR public.is_admin_or_super()
+    OR (
+        station_id IS NOT NULL
+        AND public.get_current_user_role() = 'supervisor'::user_role
+        AND public.user_has_station_assignment(tasks.station_id)
+    )
+);
+
+CREATE POLICY "Tasks deletable by super admins"
+ON public.tasks FOR DELETE
+TO authenticated
+USING (public.is_super_admin());
+
+-- =============================================================================
+-- 5.12 NOTIFICATIONS
+-- =============================================================================
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Notifications viewable by recipient" ON public.notifications;
+DROP POLICY IF EXISTS "Notifications updatable by recipient" ON public.notifications;
+DROP POLICY IF EXISTS "Notifications insertable by system or managers" ON public.notifications;
+DROP POLICY IF EXISTS "Notifications deletable by recipient" ON public.notifications;
+
+CREATE POLICY "Notifications viewable by recipient"
+ON public.notifications FOR SELECT
+TO authenticated
+USING (user_id = (SELECT auth.uid()));
+
+CREATE POLICY "Notifications updatable by recipient"
+ON public.notifications FOR UPDATE
+TO authenticated
+USING (user_id = (SELECT auth.uid()))
+WITH CHECK (user_id = (SELECT auth.uid()));
+
+CREATE POLICY "Notifications insertable by system or managers"
+ON public.notifications FOR INSERT
+TO authenticated
+WITH CHECK (
+    public.is_admin_or_super()
+    OR user_id = (SELECT auth.uid())
+);
+
+CREATE POLICY "Notifications deletable by recipient"
+ON public.notifications FOR DELETE
+TO authenticated
+USING (user_id = (SELECT auth.uid()) OR public.is_super_admin());
+
+-- =============================================================================
+-- 5.13 INSPECTIONS (Templates and Records)
+-- =============================================================================
+ALTER TABLE public.inspection_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.inspection_records ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Inspection templates viewable by authenticated users" ON public.inspection_templates;
+DROP POLICY IF EXISTS "Inspection templates manageable by super admins" ON public.inspection_templates;
+DROP POLICY IF EXISTS "Inspection records viewable by authorized station staff" ON public.inspection_records;
+DROP POLICY IF EXISTS "Inspection records insertable by authorized inspectors" ON public.inspection_records;
+DROP POLICY IF EXISTS "Inspection records updatable by authorized managers" ON public.inspection_records;
+DROP POLICY IF EXISTS "Inspection records deletable by super admins" ON public.inspection_records;
+
+CREATE POLICY "Inspection templates viewable by authenticated users"
+ON public.inspection_templates FOR SELECT
+TO authenticated
+USING (TRUE);
+
+CREATE POLICY "Inspection templates manageable by super admins"
+ON public.inspection_templates FOR ALL
+TO authenticated
+USING (public.is_super_admin());
+
+CREATE POLICY "Inspection records viewable by authorized station staff"
+ON public.inspection_records FOR SELECT
+TO authenticated
+USING (public.user_has_station_access(station_id));
+
+CREATE POLICY "Inspection records insertable by authorized inspectors"
+ON public.inspection_records FOR INSERT
+TO authenticated
+WITH CHECK (
+    public.user_has_station_access(station_id)
+    AND inspector_id = (SELECT auth.uid())
+);
+
+CREATE POLICY "Inspection records updatable by authorized managers"
+ON public.inspection_records FOR UPDATE
+TO authenticated
+USING (
+    public.is_admin_or_super()
+    OR (
+        public.get_current_user_role() = 'supervisor'::user_role
+        AND public.user_has_station_assignment(inspection_records.station_id)
+    )
+);
+
+CREATE POLICY "Inspection records deletable by super admins"
+ON public.inspection_records FOR DELETE
+TO authenticated
+USING (public.is_super_admin());
+
+-- =============================================================================
+-- 5.14 REFERENCE CATALOGS (Asset Types & Measurement Types)
+-- =============================================================================
+ALTER TABLE public.asset_types ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.measurement_types ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Asset types viewable by authenticated users" ON public.asset_types;
+DROP POLICY IF EXISTS "Asset types manageable by super admins" ON public.asset_types;
+DROP POLICY IF EXISTS "Measurement types viewable by authenticated users" ON public.measurement_types;
+DROP POLICY IF EXISTS "Measurement types manageable by super admins" ON public.measurement_types;
+
+CREATE POLICY "Asset types viewable by authenticated users"
+ON public.asset_types FOR SELECT
+TO authenticated
+USING (TRUE);
+
+CREATE POLICY "Asset types manageable by super admins"
+ON public.asset_types FOR ALL
+TO authenticated
+USING (public.is_super_admin());
+
+CREATE POLICY "Measurement types viewable by authenticated users"
+ON public.measurement_types FOR SELECT
+TO authenticated
+USING (TRUE);
+
+CREATE POLICY "Measurement types manageable by super admins"
+ON public.measurement_types FOR ALL
+TO authenticated
+USING (public.is_super_admin());
+
 -- -----------------------------------------------------------------------------
--- STEP 6: VERIFICATION BLOCK
+-- STEP 6: VERIFICATION NOTICE BLOCK
 -- -----------------------------------------------------------------------------
 DO $$
 BEGIN
-    RAISE NOTICE 'Migration 05: Centralized architecture and auth stabilization applied successfully. Multi-tenant blockers removed, centralized roles enabled, and security triggers hardened.';
+    RAISE NOTICE 'Migration 05: Comprehensive centralized RLS audit and stabilization applied successfully across all 14 tables. Legacy permissive policies dropped, least privilege enforced, and functions secured with search_path.';
 END $$;

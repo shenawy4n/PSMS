@@ -42,6 +42,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const requestIdRef = React.useRef(0);
   const isMountedRef = React.useRef(true);
   const currentUserRef = React.useRef<UserProfile | null>(currentUser);
+  const authTimeoutRef = React.useRef<any>(null);
 
   useEffect(() => {
     currentUserRef.current = currentUser;
@@ -181,8 +182,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') {
         const reqId = ++requestIdRef.current;
+        if (authTimeoutRef.current) {
+          clearTimeout(authTimeoutRef.current);
+        }
         // Schedule profile query outside the synchronous Supabase auth event lock
-        setTimeout(async () => {
+        authTimeoutRef.current = setTimeout(async () => {
           if (!isMountedRef.current || reqId !== requestIdRef.current) return;
           try {
             const { data: profileData, error: profileErr } = await client
@@ -235,6 +239,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshProfiles();
 
     return () => {
+      if (authTimeoutRef.current) {
+        clearTimeout(authTimeoutRef.current);
+      }
       authSubscription?.unsubscribe();
     };
   }, [isSupabaseMode, refreshProfiles]);
@@ -289,8 +296,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: false, error: 'يرجى إدخال كلمة المرور' };
       }
 
+      const reqId = ++requestIdRef.current;
+      if (authTimeoutRef.current) {
+        clearTimeout(authTimeoutRef.current);
+        authTimeoutRef.current = null;
+      }
+
       try {
         const { data, error } = await client.auth.signInWithPassword({ email, password });
+        if (!isMountedRef.current || reqId !== requestIdRef.current) {
+          return { success: false, error: 'تم إلغاء عملية تسجيل الدخول' };
+        }
+
         if (error) {
           const formatted = formatArabicError(error);
           return { success: false, error: formatted.message };
@@ -304,9 +321,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             .eq('id', data.user.id)
             .maybeSingle();
 
+          if (!isMountedRef.current || reqId !== requestIdRef.current) {
+            return { success: false, error: 'تم إلغاء عملية تسجيل الدخول' };
+          }
+
           if (!profileData || profileError) {
-            // Profile does not exist: sign out immediately to prevent untrusted access
-            await client.auth.signOut();
+            // Profile does not exist: sign out safely to prevent untrusted access
+            client.auth.signOut().catch(() => {});
             setCurrentUser(null);
             return {
               success: false,
@@ -315,8 +336,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
 
           if (!profileData.is_active) {
-            // Account is deactivated: sign out immediately
-            await client.auth.signOut();
+            // Account is deactivated: sign out safely
+            client.auth.signOut().catch(() => {});
             setCurrentUser(null);
             return {
               success: false,
@@ -357,6 +378,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOut = async () => {
     // 1. Immediately invalidate in-flight queries and clear local authentication state
     requestIdRef.current += 1;
+    if (authTimeoutRef.current) {
+      clearTimeout(authTimeoutRef.current);
+      authTimeoutRef.current = null;
+    }
     setCurrentUser(null);
     setIsDemoMode(false);
     setIsLoadingAuth(false);
