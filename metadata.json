@@ -1,0 +1,8 @@
+{
+  "name": "نظام إدارة محطات الكهرباء (PSMS)",
+  "description": "منظومة متقدمة لإدارة محطات الكهرباء، الموظفين، القراءات التشغيلية، بلاغات الأعطال، وجداول الصيانة.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
