@@ -23,7 +23,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useStations } from '../../context/StationContext';
 import { UserRole, UserProfile } from '../../types/database';
-import { getRoleArabicLabel, canManageRoles } from '../../lib/permissions';
+import { getRoleArabicLabel, canManageRoles, canCreateEmployee as canCreateEmployeePermission } from '../../lib/permissions';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { EmployeeFormModal } from './EmployeeFormModal';
@@ -48,7 +48,7 @@ export const EmployeeListView: React.FC<EmployeeListViewProps> = ({ onOpenAssign
   const [employeeToToggle, setEmployeeToToggle] = useState<UserProfile | null>(null);
   const [isToggling, setIsToggling] = useState(false);
 
-  const canCreateEmployee = role === 'super_admin' || role === 'admin';
+  const canCreateEmployee = canCreateEmployeePermission(role);
 
   const filteredEmployees = allProfiles.filter((p) => {
     const matchesSearch =

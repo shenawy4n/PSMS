@@ -35,9 +35,16 @@ export function formatArabicError(err: unknown): AppError {
         type: 'duplicate',
       };
     }
-    if (rawMessage.includes('employee_number') || rawMessage.includes('profiles_employee_number_key')) {
+    if (rawMessage.includes('employee_number') || rawMessage.includes('profiles_employee_number_key') || rawMessage.includes('idx_profiles_employee_number_ci')) {
       return {
         message: 'الرقم الوظيفي مسجل مسبقاً لموظف آخر في المنظومة.',
+        code: '23505',
+        type: 'duplicate',
+      };
+    }
+    if (rawMessage.includes('email') || rawMessage.includes('profiles_email_key') || rawMessage.includes('idx_profiles_email_ci')) {
+      return {
+        message: 'البريد الإلكتروني مسجل مسبقاً لموظف آخر في المنظومة.',
         code: '23505',
         type: 'duplicate',
       };
@@ -86,6 +93,15 @@ export function formatArabicError(err: unknown): AppError {
     return {
       message: 'تعذر إتمام العملية لوجود ارتباطات تشغيلية بسجلات أخرى في المنظومة.',
       code: '23503',
+      type: 'validation',
+    };
+  }
+
+  // 3.1 PostgreSQL Error Code 22P02: Invalid UUID Syntax
+  if (code === '22P02' || rawMessage.includes('invalid input syntax for type uuid') || rawMessage.includes('syntax for type uuid')) {
+    return {
+      message: 'معرّف السجل غير صالح (يجب أن يكون معرّف UUID متوافق مع نظام Supabase Auth).',
+      code: '22P02',
       type: 'validation',
     };
   }

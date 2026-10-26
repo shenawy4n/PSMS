@@ -8,6 +8,18 @@ import { UserProfile, UserRole } from '../types/database';
 import { INITIAL_PROFILES } from '../data/initialData';
 import { isSupabaseConfigured, getSupabase } from '../lib/supabase';
 import { formatArabicError } from '../lib/errorHandler';
+import { canCreateEmployee, canManageRoles } from '../lib/permissions';
+
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
 interface AuthContextType {
   currentUser: UserProfile | null;
@@ -23,7 +35,7 @@ interface AuthContextType {
   exitDemoMode: () => void;
   signIn: (email: string, password?: string) => Promise<{ success: boolean; error?: string }>;
   signOut: () => Promise<void>;
-  createEmployeeProfile: (newProfile: Omit<UserProfile, 'id' | 'created_at'>) => Promise<{ success: boolean; error?: string; profile?: UserProfile }>;
+  createEmployeeProfile: (newProfile: Omit<UserProfile, 'id' | 'created_at'> & { id?: string }) => Promise<{ success: boolean; error?: string; profile?: UserProfile }>;
   updateEmployeeProfile: (userId: string, updates: Partial<UserProfile>) => Promise<{ success: boolean; error?: string }>;
   toggleEmployeeActiveStatus: (userId: string) => Promise<{ success: boolean; error?: string }>;
   refreshProfiles: () => Promise<void>;
@@ -400,63 +412,150 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const createEmployeeProfile = async (
-    newProfile: Omit<UserProfile, 'id' | 'created_at'>
+    newProfile: Omit<UserProfile, 'id' | 'created_at'> & { id?: string }
   ): Promise<{ success: boolean; error?: string; profile?: UserProfile }> => {
-    // Check duplicate employee_number locally first
+    // 1. Authorization check: only super_admin and admin can create employees
+    if (!canCreateEmployee(role)) {
+      return { success: false, error: 'ليس لديك الصلاحية لإنشاء موظفين في المنظومة.' };
+    }
+
+    // Role escalation prevention
+    if (!canManageRoles(role, newProfile.role)) {
+      return { success: false, error: 'ليس لديك الصلاحية لمنح هذه الرتبة (لا يمكن ترقية أو إنشاء مدير نظام عام).' };
+    }
+
+    const cleanNum = newProfile.employee_number.trim().toUpperCase();
+    const cleanEmail = newProfile.email.trim().toLowerCase();
+
+    // 2. Client-side deduplication check against already loaded profiles
     const existsNum = profiles.some(
-      (p) => p.employee_number.toUpperCase() === newProfile.employee_number.toUpperCase()
+      (p) => p.employee_number.trim().toUpperCase() === cleanNum
     );
     if (existsNum) {
       return { success: false, error: 'الرقم الوظيفي مسجل مسبقاً لموظف آخر' };
     }
 
     const existsEmail = profiles.some(
-      (p) => p.email.toLowerCase() === newProfile.email.toLowerCase()
+      (p) => p.email.trim().toLowerCase() === cleanEmail
     );
     if (existsEmail) {
       return { success: false, error: 'البريد الإلكتروني مسجل مسبقاً لموظف آخر' };
     }
 
-    const newId = `usr-${Date.now()}`;
-    const timestamp = new Date().toISOString();
-    const created: UserProfile = {
-      ...newProfile,
-      id: newId,
-      created_at: timestamp,
-    };
+    // 3. Demo Mode or Local Mode (Offline / Vitest / Demo persona)
+    if (isDemoMode || !isSupabaseMode) {
+      // Must generate a valid RFC 4122 v4 UUID, NEVER a non-UUID string
+      const validId =
+        newProfile.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(newProfile.id)
+          ? newProfile.id
+          : generateUUID();
 
-    if (isSupabaseMode) {
-      const client = getSupabase();
-      if (client) {
-        try {
-          const { error } = await client.from('profiles').insert([
-            {
-              id: newId,
-              employee_number: newProfile.employee_number,
-              full_name: newProfile.full_name,
-              email: newProfile.email,
-              phone: newProfile.phone,
-              role: newProfile.role,
-              department: newProfile.department,
-              job_title: newProfile.job_title,
-              organization_id: newProfile.organization_id,
-              is_active: newProfile.is_active,
-            },
-          ]);
+      const timestamp = new Date().toISOString();
+      const created: UserProfile = {
+        ...newProfile,
+        employee_number: cleanNum,
+        email: cleanEmail,
+        id: validId,
+        created_at: timestamp,
+        assigned_station_ids: newProfile.assigned_station_ids || [],
+      };
 
-          if (error) {
-            const formatted = formatArabicError(error);
-            return { success: false, error: formatted.message };
-          }
-        } catch (err) {
-          const formatted = formatArabicError(err);
-          return { success: false, error: formatted.message };
-        }
-      }
+      setProfiles((prev) => [created, ...prev]);
+      return { success: true, profile: created };
     }
 
-    setProfiles((prev) => [created, ...prev]);
-    return { success: true, profile: created };
+    // 4. Live Supabase Mode: Server-Side Provisioning via Edge Function
+    const client = getSupabase();
+    if (!client) {
+      return { success: false, error: 'تعذر الاتصال بـ Supabase' };
+    }
+
+    try {
+      // 4.1 Invoke the server-side Supabase Edge Function 'create-employee'
+      // which uses the caller's JWT to authenticate and provisions both auth.users and public.profiles
+      const { data, error: fnError } = await client.functions.invoke('create-employee', {
+        body: {
+          employee_number: cleanNum,
+          full_name: newProfile.full_name.trim(),
+          email: cleanEmail,
+          phone: newProfile.phone?.trim() || null,
+          role: newProfile.role,
+          department: newProfile.department?.trim() || null,
+          job_title: newProfile.job_title?.trim() || null,
+          organization_id: newProfile.organization_id || null,
+          is_active: newProfile.is_active ?? true,
+          assigned_station_ids: newProfile.assigned_station_ids || [],
+        },
+      });
+
+      if (!fnError && data && data.success && data.profile) {
+        const createdProfile: UserProfile = data.profile;
+        setProfiles((prev) => [createdProfile, ...prev.filter((p) => p.id !== createdProfile.id)]);
+        await refreshProfiles();
+        return { success: true, profile: createdProfile };
+      }
+
+      // If Edge Function returned an explicit error response
+      if (data && !data.success && data.error) {
+        return { success: false, error: data.error };
+      }
+
+      if (fnError) {
+        // If an explicit pre-existing Auth User UUID was provided in newProfile.id
+        // (for example, user created manually in Supabase Dashboard -> Authentication -> Users)
+        if (
+          newProfile.id &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(newProfile.id)
+        ) {
+          const { data: dbData, error: dbError } = await client
+            .from('profiles')
+            .insert([
+              {
+                id: newProfile.id,
+                employee_number: cleanNum,
+                full_name: newProfile.full_name.trim(),
+                email: cleanEmail,
+                phone: newProfile.phone?.trim() || null,
+                role: newProfile.role,
+                department: newProfile.department?.trim() || null,
+                job_title: newProfile.job_title?.trim() || null,
+                organization_id: newProfile.organization_id || null,
+                is_active: newProfile.is_active ?? true,
+              },
+            ])
+            .select()
+            .single();
+
+          if (dbError) {
+            const formatted = formatArabicError(dbError);
+            return { success: false, error: formatted.message };
+          }
+
+          const createdProfile: UserProfile = {
+            ...dbData,
+            assigned_station_ids: newProfile.assigned_station_ids || [],
+          };
+          setProfiles((prev) => [createdProfile, ...prev.filter((p) => p.id !== createdProfile.id)]);
+          await refreshProfiles();
+          return { success: true, profile: createdProfile };
+        }
+
+        const formatted = formatArabicError(fnError);
+        const detailMessage =
+          fnError.message?.includes('Failed to send a request') ||
+          fnError.message?.includes('FunctionsFetchError') ||
+          fnError.message?.includes('404')
+            ? 'تعذر استدعاء دالة إنشاء الموظفين في Supabase (create-employee). يرجى التأكد من نشر Edge Function في مشروع Supabase.'
+            : formatted.message;
+
+        return { success: false, error: detailMessage };
+      }
+    } catch (err) {
+      const formatted = formatArabicError(err);
+      return { success: false, error: formatted.message };
+    }
+
+    return { success: false, error: 'حدث خطأ غير متوقع أثناء إضافة الموظف' };
   };
 
   const updateEmployeeProfile = async (

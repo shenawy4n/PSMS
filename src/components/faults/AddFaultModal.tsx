@@ -68,7 +68,7 @@ export const AddFaultModal: React.FC<AddFaultModalProps> = ({
       station_code: selectedStn?.code,
       asset_id: assetId || undefined,
       asset_name: selectedAsset?.name,
-      reported_by: currentUser?.id || 'usr-default',
+      reported_by: currentUser?.id || '',
       reporter_name: currentUser?.full_name || 'فني تشغيل',
       title,
       description,

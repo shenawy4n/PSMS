@@ -116,7 +116,14 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
           organization_name: currentUser?.organization_name,
         });
         if (!res.success) {
-          setServerError(res.error || 'تعذر إضافة الموظف الجديد');
+          const errMessage = res.error || 'تعذر إضافة الموظف الجديد';
+          setServerError(errMessage);
+          if (errMessage.includes('الرقم الوظيفي')) {
+            setErrors((prev) => ({ ...prev, employee_number: errMessage }));
+          }
+          if (errMessage.includes('البريد الإلكتروني')) {
+            setErrors((prev) => ({ ...prev, email: errMessage }));
+          }
           setIsSubmitting(false);
           return;
         }

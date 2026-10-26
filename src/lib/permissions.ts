@@ -13,6 +13,13 @@ export function canCreateStation(role: UserRole): boolean {
 }
 
 /**
+ * Checks whether user has permission to create a new employee profile
+ */
+export function canCreateEmployee(role: UserRole): boolean {
+  return role === 'super_admin' || role === 'admin';
+}
+
+/**
  * Checks whether user can edit general station metadata
  * In the centralized architecture, both super_admin and admin have central access across all stations.
  */

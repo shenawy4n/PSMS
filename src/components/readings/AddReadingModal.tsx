@@ -73,7 +73,7 @@ export const AddReadingModal: React.FC<AddReadingModalProps> = ({
       ...payload,
       station_code: selectedStn?.code,
       station_name: selectedStn?.name,
-      recorded_by: currentUser?.id || 'usr-default',
+      recorded_by: currentUser?.id || '',
       recorder_name: currentUser?.full_name || 'فني تشغيل',
       reading_timestamp: new Date().toISOString(),
     });
