@@ -25,12 +25,6 @@ interface OrganizationOption {
   code: string;
 }
 
-const DEFAULT_ORGANIZATION: OrganizationOption = {
-  id: 'f31f8f4b-2d2e-44a9-b001-f55aa0506fdf',
-  code: 'NPTC',
-  name: 'الشركة الوطنية لنقل الكهرباء',
-};
-
 export const StationFormModal: React.FC<StationFormModalProps> = ({
   isOpen,
   onClose,
@@ -68,8 +62,9 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
   // Fetch organizations from Supabase
   const loadOrganizations = useCallback(async () => {
     if (!isSupabaseConfigured()) {
-      setOrganizations([DEFAULT_ORGANIZATION]);
-      setSelectedOrgId(DEFAULT_ORGANIZATION.id);
+      setOrganizations([]);
+      setSelectedOrgId('');
+      setOrgLoadError(null);
       return;
     }
     const client = getSupabase();
@@ -81,28 +76,35 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
     setIsLoadingOrgs(true);
     setOrgLoadError(null);
     try {
-      const { data, error } = await client
+      const { data, error, status } = await client
         .from('organizations')
         .select('id, name, code')
         .order('name', { ascending: true });
 
       if (error) {
-        setOrgLoadError(`تعذر استرجاع قائمة المؤسسات من قاعدة البيانات (${error.message}).`);
+        if (status === 403 || error.code === '42501') {
+          setOrgLoadError('لا تتوفر صلاحية قراءة المؤسسات (قيود RLS). سيتم تسجيل المحطة مباشرة في المنظومة المركزية.');
+        } else {
+          setOrgLoadError(`تعذر استرجاع قائمة المؤسسات من قاعدة البيانات (${error.message}).`);
+        }
         setOrganizations([]);
       } else if (!data || data.length === 0) {
-        setOrgLoadError('لم يتم العثور على أي مؤسسة مسجلة في قاعدة البيانات.');
+        // In the centralized architecture, having no organizations in the database is a valid state.
+        // Stations default cleanly to the central system with organization_id = null.
+        setOrgLoadError(null);
         setOrganizations([]);
       } else {
+        setOrgLoadError(null);
         setOrganizations(data);
         setSelectedOrgId((prev) => {
           if (prev && data.some((org) => org.id === prev)) {
             return prev;
           }
-          return data[0].id;
+          return ''; // Default to centralized system
         });
       }
     } catch (err) {
-      setOrgLoadError(err instanceof Error ? err.message : 'حدث خطأ غير متوقع أثناء تحميل المؤسسات.');
+      setOrgLoadError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء تحميل المؤسسات.');
       setOrganizations([]);
     } finally {
       setIsLoadingOrgs(false);
@@ -145,9 +147,9 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
         status: 'operational',
         description: '',
       });
-      // For Super Admin: use existing selection if valid, or first loaded org
+      // For Super Admin: use existing selection if valid, otherwise empty string (centralized system)
       if (currentUser?.role === 'super_admin') {
-        setSelectedOrgId((prev) => (organizations.some((o) => o.id === prev) ? prev : (organizations[0]?.id || '')));
+        setSelectedOrgId((prev) => (organizations.some((o) => o.id === prev) ? prev : ''));
       } else {
         setSelectedOrgId(currentUser?.organization_id || '');
       }
@@ -176,10 +178,10 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
       return;
     }
 
-    // Determine target organization ID optionally (centralized architecture allows null or central system)
-    const targetOrgId = selectedOrgId || currentUser?.organization_id || (organizations[0]?.id) || null;
+    // Determine target organization ID optionally (centralized architecture allows null for central system)
+    const targetOrgId = selectedOrgId ? selectedOrgId : (currentUser?.organization_id || null);
 
-    const matchedOrg = organizations.find((o) => o.id === targetOrgId);
+    const matchedOrg = targetOrgId ? organizations.find((o) => o.id === targetOrgId) : undefined;
     const orgName = matchedOrg
       ? matchedOrg.name
       : (currentUser?.organization_name || 'المنظومة المركزية لمحطات الطاقة');
@@ -258,7 +260,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
               value={selectedOrgId}
               onChange={(e) => setSelectedOrgId(e.target.value)}
               options={[
-                { value: '', label: 'المنظومة المركزية الموحدة (افتراضي)' },
+                { value: '', label: 'المنظومة المركزية الموحدة (بدون مؤسسة فرعية)' },
                 ...organizations.map((org) => ({
                   value: org.id,
                   label: `${org.name} (${org.code})`,
@@ -272,7 +274,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
           <div className="p-2.5 bg-slate-900/60 border border-slate-800 rounded-lg text-xs text-slate-400 flex items-center justify-between">
             <span>القطاع التشغيلي التابع لحسابك:</span>
             <span className="font-semibold text-slate-200">
-              {currentUser?.organization_name || (isSupabaseConfigured() ? 'غير محدد' : DEFAULT_ORGANIZATION.name)}
+              {currentUser?.organization_name || 'المنظومة المركزية لمحطات الطاقة'}
             </span>
           </div>
         )}
@@ -428,10 +430,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
             type="submit"
             size="sm"
             isLoading={isSubmitting}
-            disabled={
-              isSubmitting ||
-              (isSupabaseConfigured() && currentUser?.role === 'super_admin' && organizations.length === 0)
-            }
+            disabled={isSubmitting}
           >
             {isEditing ? 'حفظ التعديلات' : 'إضافة المحطة'}
           </Button>

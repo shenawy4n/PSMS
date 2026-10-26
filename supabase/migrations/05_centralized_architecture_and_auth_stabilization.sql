@@ -31,22 +31,34 @@
 -- STEP 1: SCHEMA ADJUSTMENTS (Backward-Compatible Centralization)
 -- -----------------------------------------------------------------------------
 
--- 1.1 Ensure organization_id is nullable on stations
+-- 1.1 Ensure organization_id is nullable on stations using explicit schema checks
 DO $$
 BEGIN
-    ALTER TABLE public.stations ALTER COLUMN organization_id DROP NOT NULL;
-EXCEPTION
-    WHEN undefined_column THEN NULL;
-    WHEN others THEN NULL;
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'stations'
+          AND column_name = 'organization_id'
+          AND is_nullable = 'NO'
+    ) THEN
+        ALTER TABLE public.stations ALTER COLUMN organization_id DROP NOT NULL;
+    END IF;
 END $$;
 
--- 1.2 Ensure organization_id is nullable on profiles
+-- 1.2 Ensure organization_id is nullable on profiles using explicit schema checks
 DO $$
 BEGIN
-    ALTER TABLE public.profiles ALTER COLUMN organization_id DROP NOT NULL;
-EXCEPTION
-    WHEN undefined_column THEN NULL;
-    WHEN others THEN NULL;
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'profiles'
+          AND column_name = 'organization_id'
+          AND is_nullable = 'NO'
+    ) THEN
+        ALTER TABLE public.profiles ALTER COLUMN organization_id DROP NOT NULL;
+    END IF;
 END $$;
 
 -- -----------------------------------------------------------------------------

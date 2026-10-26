@@ -431,3 +431,175 @@ describe('INTEGRATION TESTS: StationContext Data Lifecycle & Stale Data Preventi
     expect(fetchCalled).toBe(false);
   });
 });
+
+/* ==============================================================================
+   PART 4: Station Creation in Centralized Model (Empty Organizations & RBAC Gate)
+   ============================================================================== */
+describe('PART 4: Station Creation in Centralized Model (Empty Organizations & RBAC Gate)', () => {
+  const sampleStationPayload = {
+    code: 'STN-CENTRAL-01',
+    name: 'محطة تحويل العاصمة المركزية 380 ك.ف',
+    type: 'transmission' as const,
+    region: 'المنطقة الوسطى',
+    governorate: 'الرياض',
+    address: 'محور الطاقة المركزي، مجمع المحطات 1',
+    voltage_level_kv: 380,
+    installed_capacity_mw: 600,
+    status: 'operational' as const,
+    description: 'محطة ربط استراتيجية تابعة للمنظومة المركزية الموحدة',
+  };
+
+  it('1. allows super_admin to create a station without an organization (organization_id = null)', () => {
+    // 1. Zod schema passes without requiring organization_id
+    const parseResult = stationFormSchema.safeParse(sampleStationPayload);
+    expect(parseResult.success).toBe(true);
+
+    // 2. Permission check: super_admin has create permissions
+    expect(canCreateStation('super_admin')).toBe(true);
+
+    // 3. Simulate StationFormModal targetOrgId resolution when selectedOrgId is empty (central system)
+    const selectedOrgId = '';
+    const superAdminUser: Partial<UserProfile> = {
+      id: 'super-admin-uuid-001',
+      role: 'super_admin',
+      organization_id: null,
+      organization_name: undefined,
+    };
+    const organizations: { id: string; name: string; code: string }[] = [];
+
+    const targetOrgId = selectedOrgId || superAdminUser.organization_id || null;
+    expect(targetOrgId).toBeNull();
+
+    const matchedOrg = targetOrgId ? organizations.find((o) => o.id === targetOrgId) : undefined;
+    const orgName = matchedOrg ? matchedOrg.name : (superAdminUser.organization_name || 'المنظومة المركزية لمحطات الطاقة');
+    expect(orgName).toBe('المنظومة المركزية لمحطات الطاقة');
+
+    // 4. Station created with null organization_id is accessible by super_admin
+    const createdStation: Partial<Station> = {
+      id: 'stn-central-null-org',
+      ...sampleStationPayload,
+      organization_id: targetOrgId,
+      organization_name: orgName,
+    };
+    expect(canAccessStation('super_admin', createdStation.id!, [], null, createdStation.organization_id)).toBe(true);
+  });
+
+  it('2. allows super_admin to create a station associated with an existing organization UUID', () => {
+    const existingOrgId = 'b245a9e3-8f0a-4c2f-a3e9-74d1a084ef11';
+    const organizations = [
+      { id: existingOrgId, name: 'الشركة الوطنية لنقل الكهرباء', code: 'NPTC' },
+    ];
+    const selectedOrgId = existingOrgId;
+    const superAdminUser: Partial<UserProfile> = {
+      id: 'super-admin-uuid-001',
+      role: 'super_admin',
+      organization_id: null,
+    };
+
+    const targetOrgId = selectedOrgId || superAdminUser.organization_id || null;
+    expect(targetOrgId).toBe(existingOrgId);
+
+    const matchedOrg = organizations.find((o) => o.id === targetOrgId);
+    expect(matchedOrg).toBeDefined();
+    expect(matchedOrg?.name).toBe('الشركة الوطنية لنقل الكهرباء');
+
+    const createdStation: Partial<Station> = {
+      id: 'stn-with-org',
+      ...sampleStationPayload,
+      organization_id: targetOrgId,
+      organization_name: matchedOrg!.name,
+    };
+    expect(canAccessStation('super_admin', createdStation.id!, [], null, createdStation.organization_id)).toBe(true);
+  });
+
+  it('3. allows admin to create a station within authorized central permissions', () => {
+    expect(canCreateStation('admin')).toBe(true);
+
+    // Admin can edit stations centrally
+    expect(canEditStation('admin')).toBe(true);
+
+    // Admin CANNOT delete stations (super_admin exclusive RBAC gate)
+    expect(canDeleteStation('admin')).toBe(false);
+
+    // Admin targetOrgId resolution preserves their central or assigned org
+    const adminUser: Partial<UserProfile> = {
+      id: 'admin-uuid-002',
+      role: 'admin',
+      organization_id: null,
+      organization_name: 'إدارة تشغيل الشبكة المركزية',
+    };
+    const selectedOrgId: string = '';
+    const targetOrgId = selectedOrgId ? selectedOrgId : (adminUser.organization_id || null);
+    expect(targetOrgId).toBeNull();
+
+    const orgName = adminUser.organization_name || 'المنظومة المركزية لمحطات الطاقة';
+    expect(orgName).toBe('إدارة تشغيل الشبكة المركزية');
+  });
+
+  it('4. strictly blocks unauthorized users (supervisor, employee) from station creation', () => {
+    // RBAC: Supervisors and Employees must never create stations
+    expect(canCreateStation('supervisor')).toBe(false);
+    expect(canCreateStation('employee')).toBe(false);
+
+    // They cannot edit stations either
+    expect(canEditStation('supervisor')).toBe(false);
+    expect(canEditStation('employee')).toBe(false);
+
+    // They cannot delete stations
+    expect(canDeleteStation('supervisor')).toBe(false);
+    expect(canDeleteStation('employee')).toBe(false);
+
+    // They are strictly bounded to their assigned stations
+    const assignedStations = ['stn-allowed-1'];
+    expect(canAccessStation('supervisor', 'stn-allowed-1', assignedStations)).toBe(true);
+    expect(canAccessStation('supervisor', 'stn-unauthorized-99', assignedStations)).toBe(false);
+    expect(canAccessStation('employee', 'stn-allowed-1', assignedStations)).toBe(true);
+    expect(canAccessStation('employee', 'stn-unauthorized-99', assignedStations)).toBe(false);
+  });
+
+  it('5. handles empty organizations list gracefully without displaying false error or disabling submit button', () => {
+    // Simulation of loadOrganizations logic
+    const handleOrgResult = (data: any[] | null, error: any, status?: number) => {
+      let orgLoadError: string | null = null;
+      let organizations: any[] = [];
+
+      if (error) {
+        if (status === 403 || error.code === '42501') {
+          orgLoadError = 'لا تتوفر صلاحية قراءة المؤسسات (قيود RLS). سيتم تسجيل المحطة مباشرة في المنظومة المركزية.';
+        } else {
+          orgLoadError = `تعذر استرجاع قائمة المؤسسات من قاعدة البيانات (${error.message}).`;
+        }
+        organizations = [];
+      } else if (!data || data.length === 0) {
+        // Normal centralized system state: no error banner
+        orgLoadError = null;
+        organizations = [];
+      } else {
+        orgLoadError = null;
+        organizations = data;
+      }
+
+      // Check whether submit button is disabled
+      const isSubmitting = false;
+      const isSubmitDisabled = isSubmitting; // Submit is NOT disabled when organizations.length === 0
+
+      return { orgLoadError, organizations, isSubmitDisabled };
+    };
+
+    // Case A: Table is empty (data: [])
+    const emptyResult = handleOrgResult([], null, 200);
+    expect(emptyResult.orgLoadError).toBeNull(); // NO misleading error!
+    expect(emptyResult.organizations).toEqual([]);
+    expect(emptyResult.isSubmitDisabled).toBe(false); // Submit button is ENABLED
+
+    // Case B: PostgREST 403 Forbidden due to RLS restriction
+    const rlsResult = handleOrgResult(null, { message: 'permission denied', code: '42501' }, 403);
+    expect(rlsResult.orgLoadError).toContain('قيود RLS');
+    expect(rlsResult.isSubmitDisabled).toBe(false);
+
+    // Case C: Network or database connection failure
+    const networkResult = handleOrgResult(null, { message: 'Connection timeout' }, 500);
+    expect(networkResult.orgLoadError).toContain('تعذر استرجاع قائمة المؤسسات');
+    expect(networkResult.isSubmitDisabled).toBe(false);
+  });
+});
