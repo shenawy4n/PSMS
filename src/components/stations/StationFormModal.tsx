@@ -283,7 +283,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
           <Input
             label="رمز المحطة الفني (Station Code)"
             placeholder="مثال: STN-132-N01"
-            value={formData.code}
+            value={formData.code ?? ''}
             onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
             error={errors.code}
             required
@@ -294,7 +294,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
           <Input
             label="اسم المحطة الرسمي الكامل"
             placeholder="مثال: محطة تحويل شمال الرياض 132/33 ك.ف"
-            value={formData.name}
+            value={formData.name ?? ''}
             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
             error={errors.name}
             required
@@ -303,7 +303,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
 
           <Select
             label="تصنيف ونوع المحطة"
-            value={formData.type}
+            value={formData.type ?? 'transmission'}
             onChange={(e) => setFormData({ ...formData, type: e.target.value as StationType })}
             options={[
               { value: 'transmission', label: 'محطة نقل وتحويل (Transmission Substation)' },
@@ -318,7 +318,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
 
           <Select
             label="الحالة التشغيلية"
-            value={formData.status}
+            value={formData.status ?? 'operational'}
             onChange={(e) => setFormData({ ...formData, status: e.target.value as StationStatus })}
             options={[
               { value: 'operational', label: 'تشغيلية (Operational)' },
@@ -335,7 +335,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
             label="الجهد التشغيلي الاسمي (كيلوفولت kV)"
             type="number"
             step="0.1"
-            value={formData.voltage_level_kv}
+            value={formData.voltage_level_kv ?? ''}
             onChange={(e) => setFormData({ ...formData, voltage_level_kv: Number(e.target.value) })}
             error={errors.voltage_level_kv}
             required
@@ -347,7 +347,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
             label="القدرة المركبة التصميمية (ميجاواط MW)"
             type="number"
             step="1"
-            value={formData.installed_capacity_mw}
+            value={formData.installed_capacity_mw ?? ''}
             onChange={(e) => setFormData({ ...formData, installed_capacity_mw: Number(e.target.value) })}
             error={errors.installed_capacity_mw}
             required
@@ -357,7 +357,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
           <Input
             label="المنطقة الجغرافية"
             placeholder="مثال: المنطقة الوسطى"
-            value={formData.region}
+            value={formData.region ?? ''}
             onChange={(e) => setFormData({ ...formData, region: e.target.value })}
             error={errors.region}
             required
@@ -367,7 +367,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
           <Input
             label="المحافظة / المدينة"
             placeholder="مثال: الرياض"
-            value={formData.governorate}
+            value={formData.governorate ?? ''}
             onChange={(e) => setFormData({ ...formData, governorate: e.target.value })}
             error={errors.governorate}
             required
@@ -378,7 +378,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
         <Input
           label="العنوان والموقع التفصيلي"
           placeholder="مثال: طريق الملك فهد، مجمع المحطات 14"
-          value={formData.address}
+          value={formData.address ?? ''}
           onChange={(e) => setFormData({ ...formData, address: e.target.value })}
           error={errors.address}
           required
@@ -416,7 +416,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
             rows={3}
             className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 disabled:opacity-50"
             placeholder="المحولات الرئيسية، خطوط الربط، وملاحظات المشغل..."
-            value={formData.description}
+            value={formData.description ?? ''}
             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
             disabled={isSubmitting}
           />

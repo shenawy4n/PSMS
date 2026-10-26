@@ -172,7 +172,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
           <Input
             label="الرقم الوظيفي"
             placeholder="مثال: EMP-502"
-            value={formData.employee_number}
+            value={formData.employee_number ?? ''}
             onChange={(e) => setFormData({ ...formData, employee_number: e.target.value.toUpperCase() })}
             error={errors.employee_number}
             required
@@ -183,7 +183,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
           <Input
             label="الاسم الكامل"
             placeholder="مثال: م. سعود المطيري"
-            value={formData.full_name}
+            value={formData.full_name ?? ''}
             onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
             error={errors.full_name}
             required
@@ -193,7 +193,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
             label="البريد الإلكتروني الرسمي"
             type="email"
             placeholder="saud@psms.gov.sa"
-            value={formData.email}
+            value={formData.email ?? ''}
             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
             error={errors.email}
             required
@@ -203,14 +203,14 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
           <Input
             label="رقم الهاتف (اختياري)"
             placeholder="+966 50 000 0000"
-            value={formData.phone}
+            value={formData.phone ?? ''}
             onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
             error={errors.phone}
           />
 
           <Select
             label="الرتبة والصلاحية"
-            value={formData.role}
+            value={formData.role ?? 'employee'}
             onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
             options={roleOptions}
             error={errors.role}
@@ -219,7 +219,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
           <Input
             label="المسمى الوظيفي الرسمي"
             placeholder="مهندس حماية أول"
-            value={formData.job_title}
+            value={formData.job_title ?? ''}
             onChange={(e) => setFormData({ ...formData, job_title: e.target.value })}
             error={errors.job_title}
             required
@@ -229,7 +229,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         <Input
           label="القسم / الإدارة التابع لها"
           placeholder="إدارة الوقاية والتحكم"
-          value={formData.department}
+          value={formData.department ?? ''}
           onChange={(e) => setFormData({ ...formData, department: e.target.value })}
           error={errors.department}
           required

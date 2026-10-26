@@ -96,4 +96,19 @@ describe('Zod Validation Architecture', () => {
       expect(result.success).toBe(false);
     });
   });
+
+  describe('Controlled Input Normalization', () => {
+    it('normalizes undefined or null values to empty strings to prevent React controlled-to-uncontrolled warnings', () => {
+      const normalizeInputValue = (value: unknown, defaultValue?: unknown) => {
+        const isUncontrolled = defaultValue !== undefined && value === undefined;
+        return isUncontrolled ? undefined : (value !== undefined && value !== null ? value : '');
+      };
+
+      expect(normalizeInputValue(undefined)).toBe('');
+      expect(normalizeInputValue(null)).toBe('');
+      expect(normalizeInputValue('test-val')).toBe('test-val');
+      expect(normalizeInputValue(0)).toBe(0);
+      expect(normalizeInputValue(undefined, 'defaultVal')).toBeUndefined();
+    });
+  });
 });
