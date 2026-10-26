@@ -501,51 +501,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (fnError) {
-        // If an explicit pre-existing Auth User UUID was provided in newProfile.id
-        // (for example, user created manually in Supabase Dashboard -> Authentication -> Users)
-        if (
-          newProfile.id &&
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(newProfile.id)
-        ) {
-          const { data: dbData, error: dbError } = await client
-            .from('profiles')
-            .insert([
-              {
-                id: newProfile.id,
-                employee_number: cleanNum,
-                full_name: newProfile.full_name.trim(),
-                email: cleanEmail,
-                phone: newProfile.phone?.trim() || null,
-                role: newProfile.role,
-                department: newProfile.department?.trim() || null,
-                job_title: newProfile.job_title?.trim() || null,
-                organization_id: newProfile.organization_id || null,
-                is_active: newProfile.is_active ?? true,
-              },
-            ])
-            .select()
-            .single();
-
-          if (dbError) {
-            const formatted = formatArabicError(dbError);
-            return { success: false, error: formatted.message };
-          }
-
-          const createdProfile: UserProfile = {
-            ...dbData,
-            assigned_station_ids: newProfile.assigned_station_ids || [],
-          };
-          setProfiles((prev) => [createdProfile, ...prev.filter((p) => p.id !== createdProfile.id)]);
-          await refreshProfiles();
-          return { success: true, profile: createdProfile };
-        }
-
         const formatted = formatArabicError(fnError);
         const detailMessage =
           fnError.message?.includes('Failed to send a request') ||
           fnError.message?.includes('FunctionsFetchError') ||
           fnError.message?.includes('404')
-            ? 'تعذر استدعاء دالة إنشاء الموظفين في Supabase (create-employee). يرجى التأكد من نشر Edge Function في مشروع Supabase.'
+            ? 'تعذر استدعاء دالة إنشاء الموظفين في Supabase (create-employee). يرجى التأكد من نشر Edge Function وتطبيق Migration 07 في مشروع Supabase.'
             : formatted.message;
 
         return { success: false, error: detailMessage };

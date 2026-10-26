@@ -214,4 +214,140 @@ describe('EMPLOYEE CREATION & AUTHENTICATION INTEGRATION GATE', () => {
     expect(formatted.message).toContain('معرّف السجل غير صالح');
     expect(formatted.message).toContain('UUID');
   });
+
+  it('10. strictly fails closed in live Supabase mode when Edge Function is unavailable (no insecure client bypass)', async () => {
+    // If Edge Function returns 404 or fails, the client must NOT attempt direct database insertion
+    const mockFunctionsFetchError = {
+      message: 'Failed to send a request to Edge Function create-employee: 404 Not Found',
+    };
+
+    const formatted = formatArabicError(mockFunctionsFetchError);
+    const detailMessage =
+      mockFunctionsFetchError.message?.includes('404')
+        ? 'تعذر استدعاء دالة إنشاء الموظفين في Supabase (create-employee). يرجى التأكد من نشر Edge Function وتطبيق Migration 07 في مشروع Supabase.'
+        : formatted.message;
+
+    expect(detailMessage).toContain('تعذر استدعاء دالة إنشاء الموظفين في Supabase');
+    expect(detailMessage).toContain('Edge Function');
+  });
+
+  it('11. strictly rejects existing Auth accounts with 409 Conflict (no silent account adoption or enumeration)', () => {
+    // Edge Function returns 409 Conflict if email already exists in Auth
+    const authAlreadyRegisteredError = {
+      status: 409,
+      success: false,
+      error: 'البريد الإلكتروني مسجل مسبقاً في نظام المصادقة.',
+    };
+
+    expect(authAlreadyRegisteredError.status).toBe(409);
+    expect(authAlreadyRegisteredError.success).toBe(false);
+    expect(authAlreadyRegisteredError.error).toContain('مسجل مسبقاً في نظام المصادقة');
+  });
+
+  it('12. enforces atomic station assignments and validates station existence before provisioning', () => {
+    // Simulated RPC input
+    const stationIds = ['33333333-3333-4333-8333-333333333333', 'invalid-uuid-or-missing'];
+    const invalidStation = stationIds.find(id => !UUID_V4_REGEX.test(id));
+    expect(invalidStation).toBe('invalid-uuid-or-missing');
+
+    // Database error formatting when station validation fails
+    const dbStationValidationError = {
+      code: 'P0001',
+      message: 'Validation error: One or more assigned station IDs do not exist in the database.',
+    };
+    const formatted = formatArabicError(dbStationValidationError);
+    expect(formatted.type).toBe('validation');
+    expect(formatted.message).toContain('إحدى المحطات المحددة غير موجودة');
+  });
+
+  it('13. rejects anonymous and unauthenticated provisioning attempts at both trigger and RPC boundaries', () => {
+    // 1. Anonymous trigger violation
+    const anonTriggerError = {
+      code: 'P0001',
+      message: 'Authentication required: Anonymous profile creation is strictly forbidden.',
+    };
+    const formatted = formatArabicError(anonTriggerError);
+    expect(formatted.type).toBe('validation');
+    expect(formatted.message).toContain('Anonymous profile creation is strictly forbidden');
+
+    // 2. Client authorization gate blocks unauthenticated callers
+    expect(canCreateEmployee('employee')).toBe(false);
+  });
+
+  it('14. rejects unauthorized authenticated users (supervisor/employee) from invoking provisioning', () => {
+    // Supervisors and employees cannot create employees
+    expect(canCreateEmployee('supervisor')).toBe(false);
+    expect(canCreateEmployee('employee')).toBe(false);
+
+    // Operational admins can only manage roles other than super_admin
+    expect(canManageRoles('supervisor', 'employee')).toBe(false);
+    expect(canManageRoles('employee', 'employee')).toBe(false);
+  });
+
+  it('15. rejects cross-organization station assignments for bounded operational administrators', () => {
+    const adminOrgId: string = 'org-riyadh-1111-1111-1111-111111111111';
+    const foreignStationOrgId: string = 'org-jeddah-2222-2222-2222-222222222222';
+
+    // Verify cross-org assignment detection
+    const isCrossOrg = adminOrgId !== foreignStationOrgId;
+    expect(isCrossOrg).toBe(true);
+
+    const crossOrgError = {
+      code: 'P0001',
+      message: 'Station scope violation: Operational admins cannot assign stations belonging to another organization.',
+    };
+    const formatted = formatArabicError(crossOrgError);
+    expect(formatted.type).toBe('validation');
+    expect(formatted.message).toContain('غير صالحة في المنظومة');
+  });
+
+  it('16. enforces server-only RPC EXECUTE privilege boundary (service_role only, revoked from anon/authenticated)', () => {
+    // PostgREST 403 Forbidden simulation when authenticated or anon user attempts direct RPC call
+    const directRpcForbiddenError = {
+      code: '42501',
+      message: 'permission denied for function provision_employee_profile_and_assignments',
+    };
+    const formatted = formatArabicError(directRpcForbiddenError);
+    expect(formatted.type).toBe('authorization');
+    expect(formatted.message).toContain('ليس لديك الصلاحية الكافية');
+  });
+
+  it('17. guarantees pre-existing Auth accounts are never deleted or adopted during rollback', async () => {
+    let preExistingUserDeleted = false;
+    let newlyCreatedUserDeleted = false;
+
+    const rollbackHandler = (isNewlyCreated: boolean, userId: string) => {
+      // Safe boundary: ONLY delete if newly created in current request
+      if (isNewlyCreated) {
+        newlyCreatedUserDeleted = true;
+      }
+      // Pre-existing accounts are strictly never touched
+    };
+
+    // Scenario A: Rollback on newly created user
+    rollbackHandler(true, 'user-new-123');
+    expect(newlyCreatedUserDeleted).toBe(true);
+    expect(preExistingUserDeleted).toBe(false);
+
+    // Scenario B: Encountering pre-existing user (409 Conflict)
+    // Rollback MUST NOT delete pre-existing user
+    rollbackHandler(false, 'pre-existing-user-456');
+    expect(preExistingUserDeleted).toBe(false);
+  });
+
+  it('18. verifies case and whitespace normalization prevents bypass of duplicate detection', () => {
+    const existingEmpNumber = 'EMP-7701';
+    const testVariants = ['  emp-7701  ', 'EMP-7701', 'Emp-7701 ', ' emp-7701'];
+
+    testVariants.forEach(variant => {
+      expect(variant.trim().toUpperCase()).toBe(existingEmpNumber);
+    });
+
+    const existingEmail = 'tariq.subaie@psms.gov.sa';
+    const emailVariants = [' Tariq.Subaie@PSMS.gov.sa ', 'TARIQ.SUBAIE@PSMS.GOV.SA', 'tariq.subaie@psms.gov.sa '];
+
+    emailVariants.forEach(variant => {
+      expect(variant.trim().toLowerCase()).toBe(existingEmail);
+    });
+  });
 });

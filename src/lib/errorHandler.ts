@@ -106,6 +106,26 @@ export function formatArabicError(err: unknown): AppError {
     };
   }
 
+  // 3.2 PostgreSQL Error Code P0001: Custom RAISE EXCEPTION / Business Rule Validation
+  if (
+    code === 'P0001' ||
+    rawMessage.includes('Validation error') ||
+    rawMessage.includes('Station validation failed')
+  ) {
+    if (rawMessage.includes('station') || rawMessage.includes('stations')) {
+      return {
+        message: 'خطأ في التحقق من البيانات: إحدى المحطات المحددة غير موجودة أو غير صالحة في المنظومة.',
+        code: 'P0001',
+        type: 'validation',
+      };
+    }
+    return {
+      message: `خطأ في التحقق من البيانات: ${rawMessage.replace(/.*?Validation error:\s*/i, '')}`,
+      code: 'P0001',
+      type: 'validation',
+    };
+  }
+
   // 4. Supabase Auth specific error codes & messages
   if (rawMessage.includes('Invalid login credentials')) {
     return {

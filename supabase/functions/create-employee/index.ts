@@ -5,16 +5,19 @@
  * Supabase Edge Function: create-employee
  * 
  * Securely provisions a new employee in Supabase Auth (auth.users) and creates
- * the corresponding functional profile (public.profiles) in a single atomic flow.
+ * the corresponding functional profile (public.profiles) and station assignments
+ * in a single atomic database transaction.
  * 
  * Security Guardrails:
- * 1. Validates the caller's Bearer JWT via Supabase Auth.
- * 2. Enforces RBAC on the server: caller must have role 'super_admin' or 'admin'.
+ * 1. Validates caller Bearer JWT via Supabase Auth server-side.
+ * 2. Enforces RBAC on server: caller must be an active 'super_admin' or 'admin'.
  * 3. Prevents privilege escalation: 'admin' cannot create or promote to 'super_admin'.
- * 4. Checks unique constraints for email and employee_number in public.profiles.
- * 5. Uses Supabase Admin API with SUPABASE_SERVICE_ROLE_KEY securely on the server.
- * 6. Implements rollback: if profile insertion fails, deletes the newly created auth user.
- * 7. Supports station assignments linkage.
+ * 4. Enforces organization scope: 'admin' cannot create employees outside their organization.
+ * 5. NO ACCOUNT REUSE: Rejects duplicate emails immediately; prevents silent account takeover.
+ * 6. Deduplicates and validates station IDs format before invocation.
+ * 7. Calls atomic, server-only RPC provision_employee_profile_and_assignments.
+ * 8. Automatic rollback: Deletes ONLY the newly created Auth user if database provisioning fails.
+ * 9. Accurately reports invite status without false delivery claims.
  */
 
 // @ts-ignore: Deno imports
@@ -25,6 +28,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // @ts-ignore: Deno runtime
 Deno.serve(async (req: Request) => {
@@ -90,7 +95,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: callerProfile, error: callerProfileError } = await adminClient
       .from('profiles')
-      .select('id, role, full_name, is_active')
+      .select('id, role, organization_id, full_name, is_active')
       .eq('id', callerUser.id)
       .maybeSingle();
 
@@ -168,18 +173,40 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 6. Privilege escalation check: Admins cannot create Super Admins
-    if (callerRole === 'admin' && role === 'super_admin') {
-      return new Response(
-        JSON.stringify({ success: false, error: 'غير مسموح لمدير القطاع بإنشاء أو ترقية حساب إلى مدير نظام عام (Super Admin).' }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    // 6. Privilege escalation & organization scope checks
+    if (callerRole === 'admin') {
+      if (role === 'super_admin') {
+        return new Response(
+          JSON.stringify({ success: false, error: 'غير مسموح لمدير القطاع بإنشاء أو ترقية حساب إلى مدير نظام عام (Super Admin).' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (callerProfile.organization_id && organization_id && organization_id !== callerProfile.organization_id) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'غير مسموح لمدير القطاع بإنشاء موظفين خارج قطاعه التشغيلي.' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
+    // Validate and deduplicate station IDs
+    let uniqueStationIds: string[] = [];
+    if (Array.isArray(assigned_station_ids) && assigned_station_ids.length > 0) {
+      const invalidStationId = assigned_station_ids.find((id: any) => typeof id !== 'string' || !UUID_REGEX.test(id));
+      if (invalidStationId) {
+        return new Response(
+          JSON.stringify({ success: false, error: `معرّف المحطة غير صالح (يجب أن يكون UUID): ${invalidStationId}` }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      uniqueStationIds = Array.from(new Set(assigned_station_ids));
     }
 
     const cleanEmpNumber = employee_number.trim().toUpperCase();
     const cleanEmail = email.trim().toLowerCase();
 
-    // 7. Check duplicates in public.profiles
+    // 7. Check duplicates in public.profiles first
     const { data: existingEmp } = await adminClient
       .from('profiles')
       .select('id')
@@ -207,8 +234,10 @@ Deno.serve(async (req: Request) => {
     }
 
     // 8. Provision user account in Supabase Auth (auth.users)
+    // Strictly NO account reuse: If email exists in auth, fail immediately with 409 Conflict.
     let authUserId: string | null = null;
     let newlyCreatedAuth = false;
+    let inviteDelivered = false;
 
     const userMetadata = {
       full_name: full_name.trim(),
@@ -216,7 +245,7 @@ Deno.serve(async (req: Request) => {
       role: role,
     };
 
-    // First attempt: Invite user by email (sends an invitation email for secure password creation)
+    // First attempt: Invite user by email
     const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(cleanEmail, {
       data: userMetadata,
     });
@@ -224,9 +253,16 @@ Deno.serve(async (req: Request) => {
     if (!inviteError && inviteData?.user) {
       authUserId = inviteData.user.id;
       newlyCreatedAuth = true;
+      inviteDelivered = true;
     } else {
-      // If invite fails (e.g. SMTP not configured in development or mail provider off),
-      // create user directly with email_confirm: true so account is ready for password reset / sign-in
+      if (inviteError?.message?.toLowerCase().includes('already registered')) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'البريد الإلكتروني مسجل مسبقاً في نظام المصادقة.' }),
+          { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // If invite fails due to mail provider/SMTP config in dev, create user with email_confirm: true
       const { data: createData, error: createError } = await adminClient.auth.admin.createUser({
         email: cleanEmail,
         email_confirm: true,
@@ -236,19 +272,12 @@ Deno.serve(async (req: Request) => {
       if (!createError && createData?.user) {
         authUserId = createData.user.id;
         newlyCreatedAuth = true;
-      } else if (createError?.message?.includes('already registered')) {
-        // User exists in auth.users, check if they are orphaned (no profile)
-        const { data: listData } = await adminClient.auth.admin.listUsers({ perPage: 1000 });
-        const existingAuthUser = listData?.users?.find((u: any) => u.email?.toLowerCase() === cleanEmail);
-
-        if (existingAuthUser) {
-          authUserId = existingAuthUser.id;
-        } else {
-          return new Response(
-            JSON.stringify({ success: false, error: 'البريد الإلكتروني مسجل مسبقاً في نظام المصادقة.' }),
-            { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
+        inviteDelivered = false;
+      } else if (createError?.message?.toLowerCase().includes('already registered')) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'البريد الإلكتروني مسجل مسبقاً في نظام المصادقة.' }),
+          { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       } else {
         return new Response(
           JSON.stringify({
@@ -267,30 +296,33 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 9. Insert profile into public.profiles
-    const { data: insertedProfile, error: profileInsertError } = await adminClient
-      .from('profiles')
-      .insert([
-        {
-          id: authUserId,
-          employee_number: cleanEmpNumber,
-          full_name: full_name.trim(),
-          email: cleanEmail,
-          phone: phone ? phone.trim() : null,
-          role: role,
-          department: department ? department.trim() : null,
-          job_title: job_title ? job_title.trim() : null,
-          organization_id: organization_id || null,
-          is_active: Boolean(is_active),
-        },
-      ])
-      .select()
-      .single();
+    // 9. Provision profile and station assignments atomically via database RPC
+    const targetOrgId = callerRole === 'admin' && callerProfile.organization_id
+      ? callerProfile.organization_id
+      : (organization_id || null);
 
-    if (profileInsertError) {
-      console.error('Failed to insert into public.profiles:', profileInsertError);
+    const { data: rpcResult, error: rpcError } = await adminClient.rpc(
+      'provision_employee_profile_and_assignments',
+      {
+        p_user_id: authUserId,
+        p_employee_number: cleanEmpNumber,
+        p_full_name: full_name.trim(),
+        p_email: cleanEmail,
+        p_phone: phone ? phone.trim() : null,
+        p_role: role,
+        p_department: department ? department.trim() : null,
+        p_job_title: job_title ? job_title.trim() : null,
+        p_organization_id: targetOrgId,
+        p_is_active: Boolean(is_active),
+        p_station_ids: uniqueStationIds,
+        p_assigned_by: callerUser.id,
+      }
+    );
 
-      // Rollback: delete the created auth user so we don't leave an orphaned auth user
+    if (rpcError) {
+      console.error('RPC provision_employee_profile_and_assignments error:', rpcError);
+
+      // Rollback: delete ONLY the user created in this request
       if (newlyCreatedAuth && authUserId) {
         await adminClient.auth.admin.deleteUser(authUserId).catch((err: any) => {
           console.error('Rollback auth user deletion error:', err);
@@ -300,39 +332,22 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({
           success: false,
-          error: `تعذر حفظ الملف الوظيفي في قاعدة البيانات (${profileInsertError.message}).`,
+          error: `تعذر حفظ الملف الوظيفي والمهام (${rpcError.message}).`,
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // 10. Process initial station assignments if supplied
-    if (Array.isArray(assigned_station_ids) && assigned_station_ids.length > 0) {
-      const assignmentRows = assigned_station_ids.map((stnId: string) => ({
-        station_id: stnId,
-        user_id: authUserId,
-        assignment_role: job_title ? job_title.trim() : 'مشغل محطة',
-        assigned_by: callerUser.id,
-        is_active: true,
-      }));
-
-      await adminClient.from('station_assignments').insert(assignmentRows).catch((asgErr: any) => {
-        console.warn('Initial station assignment warning (non-fatal):', asgErr);
-      });
-    }
-
-    // 11. Return created profile response
-    const finalProfile = {
-      ...insertedProfile,
-      assigned_station_ids: assigned_station_ids || [],
-    };
+    const successMessage = inviteDelivered
+      ? 'تم إرسال دعوة البريد الإلكتروني وإنشاء حساب الموظف وتعيين المحطات بنجاح.'
+      : 'تم إنشاء حساب الموظف وملفه الوظيفي وتعيين المحطات بنجاح (جاهز لتسجيل الدخول).';
 
     return new Response(
       JSON.stringify({
         success: true,
         user_id: authUserId,
-        profile: finalProfile,
-        message: 'تم إنشاء حساب الموظف وملفه الوظيفي بنجاح.',
+        profile: rpcResult,
+        message: successMessage,
       }),
       { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
