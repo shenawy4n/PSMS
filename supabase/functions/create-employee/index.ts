@@ -18,21 +18,24 @@
  * 7. Calls atomic, server-only RPC provision_employee_profile_and_assignments.
  * 8. Automatic rollback: Deletes ONLY the newly created Auth user if database provisioning fails.
  * 9. Accurately reports invite status without false delivery claims.
+ * 10. Masks sensitive database internals from client responses while maintaining audit logs.
  */
 
 // @ts-ignore: Deno imports
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.8';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
-
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
 
 // @ts-ignore: Deno runtime
 Deno.serve(async (req: Request) => {
+  const origin = req.headers.get('Origin') || '*';
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  };
+
   // Handle CORS preflight request
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -158,9 +161,9 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    if (!email || typeof email !== 'string' || !EMAIL_REGEX.test(email.trim())) {
       return new Response(
-        JSON.stringify({ success: false, error: 'يرجى إدخال بريد إلكتروني رسمي صالح.' }),
+        JSON.stringify({ success: false, error: 'يرجى إدخال بريد إلكتروني رسمي صالح ومطابق للمواصفات القياسية.' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -182,7 +185,14 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      if (callerProfile.organization_id && organization_id && organization_id !== callerProfile.organization_id) {
+      if (!callerProfile.organization_id) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'حساب مدير القطاع غير مرتبط بمنظمة محددة، يرجى مراجعة إدارة المنظومة.' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (organization_id && organization_id !== callerProfile.organization_id) {
         return new Response(
           JSON.stringify({ success: false, error: 'غير مسموح لمدير القطاع بإنشاء موظفين خارج قطاعه التشغيلي.' }),
           { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -297,7 +307,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // 9. Provision profile and station assignments atomically via database RPC
-    const targetOrgId = callerRole === 'admin' && callerProfile.organization_id
+    const targetOrgId = callerRole === 'admin'
       ? callerProfile.organization_id
       : (organization_id || null);
 
@@ -329,10 +339,26 @@ Deno.serve(async (req: Request) => {
         });
       }
 
+      // Safe user-friendly Arabic error mapping without leaking internal database schema/code
+      let clientErrorMessage = 'تعذر إتمام تسجيل الملف الوظيفي في قاعدة البيانات.';
+      const rawMsg = rpcError.message || '';
+
+      if (rawMsg.includes('Conflict') || rawMsg.includes('already exists')) {
+        clientErrorMessage = 'الرقم الوظيفي أو البريد الإلكتروني مسجل مسبقاً في قاعدة البيانات.';
+      } else if (rawMsg.includes('Station scope violation')) {
+        clientErrorMessage = 'المحطات المحددة تقع خارج النطاق التشغيلي المصرح به لمدير القطاع.';
+      } else if (rawMsg.includes('Organization scope violation')) {
+        clientErrorMessage = 'غير مصرح لمدير القطاع بإنشاء موظفين خارج منظمته.';
+      } else if (rawMsg.includes('Validation error: One or more assigned station IDs do not exist')) {
+        clientErrorMessage = 'إحدى المحطات المحددة غير موجودة في قاعدة البيانات.';
+      } else if (rawMsg.includes('Privilege escalation violation')) {
+        clientErrorMessage = 'لا يمكن منح رتبة مدير نظام عام (Super Admin) إلا من خلال المشرف العام.';
+      }
+
       return new Response(
         JSON.stringify({
           success: false,
-          error: `تعذر حفظ الملف الوظيفي والمهام (${rpcError.message}).`,
+          error: clientErrorMessage,
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -356,7 +382,7 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         success: false,
-        error: err instanceof Error ? err.message : 'حدث خطأ خادمي غير متوقع أثناء معالجة الطلب.',
+        error: 'حدث خطأ خادمي غير متوقع أثناء معالجة الطلب.',
       }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

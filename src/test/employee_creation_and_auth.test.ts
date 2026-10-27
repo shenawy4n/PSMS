@@ -350,4 +350,63 @@ describe('EMPLOYEE CREATION & AUTHENTICATION INTEGRATION GATE', () => {
       expect(variant.trim().toLowerCase()).toBe(existingEmail);
     });
   });
+
+  it('19. rejects operational admin from provisioning when not assigned to an organization', () => {
+    const adminWithoutOrgError = {
+      code: 'P0001',
+      message: 'Authorization error: Operational admin must be assigned to an organization to provision personnel.',
+    };
+    const formatted = formatArabicError(adminWithoutOrgError);
+    expect(formatted.type).toBe('validation');
+    expect(formatted.message).toContain('Operational admin must be assigned to an organization');
+  });
+
+  it('20. strictly forbids operational admin from assigning national stations where organization_id is NULL', () => {
+    // Station with organization_id = null represents national central infrastructure
+    const nationalStationAssignmentAttempt = (callerRole: string, stationOrgId: string | null, callerOrgId: string) => {
+      if (callerRole === 'admin') {
+        if (stationOrgId === null || stationOrgId !== callerOrgId) {
+          return { allowed: false, reason: 'Station scope violation' };
+        }
+      }
+      return { allowed: true };
+    };
+
+    // Admin attempt to assign null organization station -> REJECTED
+    const adminResult = nationalStationAssignmentAttempt('admin', null, 'org-riyadh-111');
+    expect(adminResult.allowed).toBe(false);
+    expect(adminResult.reason).toBe('Station scope violation');
+
+    // Super admin attempt to assign null organization station -> ALLOWED
+    const superAdminResult = nationalStationAssignmentAttempt('super_admin', null, 'org-central');
+    expect(superAdminResult.allowed).toBe(true);
+  });
+
+  it('21. rejects invalid and malformed email formats via strict RFC regex', () => {
+    const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+
+    const invalidEmails = [
+      'plainaddress',
+      '@missingusername.com',
+      'username@.com',
+      'username@com',
+      'user space@domain.com',
+      'user@domain..com',
+      '',
+    ];
+
+    invalidEmails.forEach(email => {
+      expect(EMAIL_REGEX.test(email)).toBe(false);
+    });
+
+    const validEmails = [
+      'engineer.tariq@psms.gov.sa',
+      'admin.central@grid.power.sa',
+      'operator123@substation.net',
+    ];
+
+    validEmails.forEach(email => {
+      expect(EMAIL_REGEX.test(email)).toBe(true);
+    });
+  });
 });

@@ -19,9 +19,12 @@
 --   3. Transactional, Least-Privilege Provisioning RPC:
 --      - Function: public.provision_employee_profile_and_assignments(...)
 --      - Restricts EXECUTE strictly to service_role (revoked from PUBLIC, anon, authenticated).
---      - Validates station existence and enforces organization boundaries:
---        * Requesting administrator must be active and have administrative role.
---        * Admins cannot grant super_admin or assign employees/stations outside their organization.
+--      - Enforces strict administrator validation and organizational scope:
+--        * p_assigned_by is mandatory and validated against public.profiles (must be active admin/super_admin).
+--        * Admins cannot grant super_admin or assign employees outside their organization.
+--        * Operational admins must have an assigned organization and can ONLY assign stations
+--          strictly belonging to their organization. Stations with organization_id IS NULL
+--          represent national/central grid assets and can ONLY be assigned by super_admin.
 --        * Employee organization and station organization must be compatible.
 --      - Atomic execution: Inserts profile and station assignments within a single transaction.
 --        Any constraint violation rolls back the entire database operation cleanly.
@@ -219,7 +222,8 @@ BEGIN
     END IF;
 
     v_clean_email := LOWER(TRIM(p_email));
-    IF v_clean_email NOT LIKE '%_@__%.__%' THEN
+    -- Strict email format regex check
+    IF v_clean_email !~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' THEN
         RAISE EXCEPTION 'Validation error: Invalid email format.';
     END IF;
 
@@ -228,32 +232,41 @@ BEGIN
     END IF;
 
     -- 3. Check requesting administrator authorization and boundaries
-    IF p_assigned_by IS NOT NULL THEN
-        SELECT role, organization_id INTO v_admin_role, v_admin_org_id
-        FROM public.profiles
-        WHERE id = p_assigned_by AND is_active = TRUE;
+    -- Administrator ID is mandatory for accountability and organizational boundary checks
+    IF p_assigned_by IS NULL THEN
+        RAISE EXCEPTION 'Validation error: Requesting administrator ID (assigned_by) is required.';
+    END IF;
 
-        IF NOT FOUND THEN
-            RAISE EXCEPTION 'Authorization error: Requesting administrator profile not found or inactive.';
+    SELECT role, organization_id INTO v_admin_role, v_admin_org_id
+    FROM public.profiles
+    WHERE id = p_assigned_by AND is_active = TRUE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Authorization error: Requesting administrator profile not found or inactive.';
+    END IF;
+
+    IF v_admin_role NOT IN ('super_admin'::user_role, 'admin'::user_role) THEN
+        RAISE EXCEPTION 'Permission denied: Requesting user is not authorized to create employees.';
+    END IF;
+
+    -- Privilege escalation check
+    IF v_admin_role = 'admin'::user_role AND p_role = 'super_admin'::user_role THEN
+        RAISE EXCEPTION 'Privilege escalation violation: Operational admins cannot create Super Admin accounts.';
+    END IF;
+
+    -- Organization scope check for operational admins
+    IF v_admin_role = 'admin'::user_role THEN
+        -- An operational admin must have an assigned organization
+        IF v_admin_org_id IS NULL THEN
+            RAISE EXCEPTION 'Authorization error: Operational admin must be assigned to an organization to provision personnel.';
         END IF;
 
-        IF v_admin_role NOT IN ('super_admin'::user_role, 'admin'::user_role) THEN
-            RAISE EXCEPTION 'Permission denied: Requesting user is not authorized to create employees.';
+        IF v_effective_org_id IS NOT NULL AND v_effective_org_id != v_admin_org_id THEN
+            RAISE EXCEPTION 'Organization scope violation: Operational admins cannot create profiles outside their organization.';
         END IF;
 
-        -- Privilege escalation check
-        IF v_admin_role = 'admin'::user_role AND p_role = 'super_admin'::user_role THEN
-            RAISE EXCEPTION 'Privilege escalation violation: Operational admins cannot create Super Admin accounts.';
-        END IF;
-
-        -- Organization scope check for operational admins
-        IF v_admin_role = 'admin'::user_role AND v_admin_org_id IS NOT NULL THEN
-            IF v_effective_org_id IS NOT NULL AND v_effective_org_id != v_admin_org_id THEN
-                RAISE EXCEPTION 'Organization scope violation: Operational admins cannot create profiles outside their organization.';
-            END IF;
-            -- Automatically bind employee to administrator's organization
-            v_effective_org_id := v_admin_org_id;
-        END IF;
+        -- Automatically bind employee to administrator's organization
+        v_effective_org_id := v_admin_org_id;
     END IF;
 
     -- 4. Check uniqueness in public.profiles
@@ -284,15 +297,16 @@ BEGIN
             RAISE EXCEPTION 'Validation error: One or more assigned station IDs do not exist in the database.';
         END IF;
 
-        -- Verify administrator station scope
-        IF v_admin_role = 'admin'::user_role AND v_admin_org_id IS NOT NULL THEN
+        -- Verify administrator station scope:
+        -- Operational admins can ONLY assign stations strictly belonging to their organization.
+        -- Stations where organization_id IS NULL (national/grid assets) require super_admin privileges.
+        IF v_admin_role = 'admin'::user_role THEN
             IF EXISTS (
                 SELECT 1 FROM public.stations
                 WHERE id = ANY(v_unique_station_ids)
-                  AND organization_id IS NOT NULL
-                  AND organization_id != v_admin_org_id
+                  AND (organization_id IS NULL OR organization_id != v_admin_org_id)
             ) THEN
-                RAISE EXCEPTION 'Station scope violation: Operational admins cannot assign stations belonging to another organization.';
+                RAISE EXCEPTION 'Station scope violation: Operational admins can only assign stations belonging strictly to their organization.';
             END IF;
         END IF;
 
@@ -353,7 +367,7 @@ BEGIN
                 v_target_station_id,
                 p_user_id,
                 COALESCE(NULLIF(TRIM(p_job_title), ''), 'مشغل محطة'),
-                COALESCE(p_assigned_by, v_inserted_profile.id),
+                p_assigned_by,
                 TRUE,
                 NOW()
             ) ON CONFLICT (station_id, user_id) 
