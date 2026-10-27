@@ -94,6 +94,11 @@ Deno.serve(async (req: Request) => {
     // 3. Verify caller authorization and role in public.profiles using admin client
     const adminClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
       auth: { persistSession: false, autoRefreshToken: false },
+      global: {
+        headers: {
+          Authorization: `Bearer ${supabaseServiceRoleKey}`,
+        },
+      },
     });
 
     const { data: callerProfile, error: callerProfileError } = await adminClient
@@ -310,6 +315,16 @@ Deno.serve(async (req: Request) => {
     const targetOrgId = callerRole === 'admin'
       ? callerProfile.organization_id
       : (organization_id || null);
+
+    // Limited & safe server-side diagnostics (booleans only; strictly NO keys, JWTs, or personal data)
+    console.log('[create-employee] RPC Pre-Invocation Diagnostics:', {
+      hasServiceRoleKey: Boolean(supabaseServiceRoleKey && supabaseServiceRoleKey.length > 20),
+      hasCallerAuthHeader: Boolean(authHeader && authHeader.startsWith('Bearer ')),
+      hasAdminAuthHeaderConfigured: true,
+      hasAuthUserId: Boolean(authUserId),
+      hasTargetOrgId: Boolean(targetOrgId),
+      stationCount: uniqueStationIds.length,
+    });
 
     const { data: rpcResult, error: rpcError } = await adminClient.rpc(
       'provision_employee_profile_and_assignments',
