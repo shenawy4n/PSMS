@@ -1,0 +1,4 @@
+project_id = "gygksvqqqtjqgcnwfjha"
+
+[functions.create-employee]
+verify_jwt = true
