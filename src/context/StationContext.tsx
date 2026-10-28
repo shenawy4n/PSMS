@@ -147,7 +147,17 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       if (!isMountedRef.current || reqId !== stationRequestIdRef.current) return;
 
-      if (dbStations && !stnError) {
+      if (stnError) {
+        console.error('Error fetching stations:', stnError);
+        if (stnError.code === '42P17' || stnError.message?.includes('infinite recursion')) {
+          showToast(
+            'error',
+            'تنبيه RLS (42P17): تم رصد تكرار لانهائي في سياسات الأمان. يرجى تطبيق كود الترحيل 09 في Supabase SQL Editor.'
+          );
+        } else {
+          showToast('error', `تعذر جلب بيانات المحطات من Supabase: ${stnError.message}`);
+        }
+      } else if (dbStations) {
         const mapped: Station[] = dbStations.map((s: any) => ({
           ...s,
           organization_name: s.organizations?.name || s.organization_name || '',

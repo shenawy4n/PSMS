@@ -5,20 +5,69 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Read from Vite environment variables
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const memoryStorage = new Map<string, string>();
+
+function getStorageItem(key: string): string | null {
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.localStorage) {
+      return globalThis.localStorage.getItem(key);
+    }
+  } catch {}
+  return memoryStorage.get(key) || null;
+}
+
+function setStorageItem(key: string, value: string): void {
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.localStorage) {
+      globalThis.localStorage.setItem(key, value);
+      return;
+    }
+  } catch {}
+  memoryStorage.set(key, value);
+}
+
+function removeStorageItem(key: string): void {
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.localStorage) {
+      globalThis.localStorage.removeItem(key);
+    }
+  } catch {}
+  memoryStorage.delete(key);
+}
+
+// Read from Vite environment variables or dynamic local storage for easy zero-restart setup
+export function getActiveSupabaseUrl(): string {
+  const custom = getStorageItem('psms_supabase_url');
+  if (custom && custom.trim() && !custom.includes('your-project-id')) {
+    return custom.trim();
+  }
+  return (import.meta.env.VITE_SUPABASE_URL || '').trim();
+}
+
+export function getActiveSupabaseKey(): string {
+  const custom = getStorageItem('psms_supabase_key');
+  if (custom && custom.trim() && !custom.includes('your-anon-or-publishable-key')) {
+    return custom.trim();
+  }
+  return (
+    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+    import.meta.env.VITE_SUPABASE_ANON_KEY ||
+    ''
+  ).trim();
+}
 
 // Verify whether valid credentials have been supplied
 export function isSupabaseConfigured(): boolean {
-  if (!supabaseUrl || !supabasePublishableKey) {
+  const url = getActiveSupabaseUrl();
+  const key = getActiveSupabaseKey();
+  if (!url || !key) {
     return false;
   }
   // Check if it's still the default template placeholder
   if (
-    supabaseUrl.includes('your-project-id') ||
-    supabaseUrl.includes('MY_APP_URL') ||
-    supabasePublishableKey.includes('your-anon-or-publishable-key')
+    url.includes('your-project-id') ||
+    url.includes('MY_APP_URL') ||
+    key.includes('your-anon-or-publishable-key')
   ) {
     return false;
   }
@@ -26,29 +75,54 @@ export function isSupabaseConfigured(): boolean {
 }
 
 export function getSupabaseConfig() {
+  const url = getActiveSupabaseUrl();
+  const key = getActiveSupabaseKey();
+  const isCustom = typeof window !== 'undefined' && Boolean(localStorage.getItem('psms_supabase_url'));
   return {
-    url: supabaseUrl || 'غير معرّف (يرجى ضبط VITE_SUPABASE_URL)',
+    url: url || 'غير معرّف (يرجى ضبط VITE_SUPABASE_URL)',
     isConfigured: isSupabaseConfigured(),
-    hasKey: Boolean(supabasePublishableKey && !supabasePublishableKey.includes('your-anon-or-publishable-key')),
+    hasKey: Boolean(key && !key.includes('your-anon-or-publishable-key')),
+    isCustom,
   };
 }
 
-// Fallback dummy client if credentials are missing, preventing runtime initialization crashes
+// Global cached client instance
 let clientInstance: SupabaseClient | null = null;
+let currentClientKey = '';
+
+export function setCustomCredentials(url: string, key: string): boolean {
+  if (url.trim()) setStorageItem('psms_supabase_url', url.trim());
+  if (key.trim()) setStorageItem('psms_supabase_key', key.trim());
+  clientInstance = null;
+  currentClientKey = '';
+  return true;
+}
+
+export function clearCustomCredentials(): void {
+  removeStorageItem('psms_supabase_url');
+  removeStorageItem('psms_supabase_key');
+  clientInstance = null;
+  currentClientKey = '';
+}
 
 export function getSupabase(): SupabaseClient | null {
   if (!isSupabaseConfigured()) {
     return null;
   }
-  if (!clientInstance) {
+  const url = getActiveSupabaseUrl();
+  const key = getActiveSupabaseKey();
+  const cacheKey = `${url}_${key}`;
+
+  if (!clientInstance || currentClientKey !== cacheKey) {
     try {
-      clientInstance = createClient(supabaseUrl, supabasePublishableKey, {
+      clientInstance = createClient(url, key, {
         auth: {
           persistSession: true,
           autoRefreshToken: true,
           detectSessionInUrl: true,
         },
       });
+      currentClientKey = cacheKey;
     } catch (err) {
       console.warn('Failed to initialize Supabase client:', err);
       return null;
@@ -95,6 +169,13 @@ export async function testSupabaseConnection(): Promise<{
         return {
           success: true,
           message: 'تم الاتصال بخادم Supabase بنجاح! يلزم تشغيل ملف الترحيل (01_initial_schema.sql) لإنشاء الجداول.',
+          latencyMs: latency,
+        };
+      }
+      if (error.code === '42P17' || error.message?.includes('infinite recursion')) {
+        return {
+          success: false,
+          message: 'تم الاتصال بخادم Supabase، ولكن تم رصد تكرار لانهائي في سياسات الأمان RLS (خطأ 42P17). يرجى تطبيق ملف الترحيل 09_production_readiness_patch.sql في لوحة Supabase SQL Editor لحل المشكلة نهائياً.',
           latencyMs: latency,
         };
       }

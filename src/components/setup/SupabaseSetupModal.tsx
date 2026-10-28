@@ -12,10 +12,21 @@ import {
   Check,
   Terminal,
   ShieldCheck,
-  ExternalLink,
   RefreshCw,
+  Key,
+  Globe,
+  Sliders,
+  Trash2,
 } from 'lucide-react';
-import { isSupabaseConfigured, getSupabaseConfig, testSupabaseConnection } from '../../lib/supabase';
+import {
+  isSupabaseConfigured,
+  getSupabaseConfig,
+  testSupabaseConnection,
+  setCustomCredentials,
+  clearCustomCredentials,
+  getActiveSupabaseUrl,
+  getActiveSupabaseKey,
+} from '../../lib/supabase';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 
@@ -28,12 +39,19 @@ export const SupabaseSetupModal: React.FC<SupabaseSetupModalProps> = ({ isOpen, 
   const config = getSupabaseConfig();
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string; latencyMs?: number } | null>(null);
-  const [copiedMigration, setCopiedMigration] = useState(false);
-  const [copiedMigration2, setCopiedMigration2] = useState(false);
-  const [copiedMigration3, setCopiedMigration3] = useState(false);
+
+  // Form inputs for direct credentials setup
+  const [inputUrl, setInputUrl] = useState(
+    getActiveSupabaseUrl() || 'https://gygksvqqqtjqgcnwfjha.supabase.co'
+  );
+  const [inputKey, setInputKey] = useState(getActiveSupabaseKey() || '');
+  const [isSavedNotice, setIsSavedNotice] = useState(false);
+
+  // Copied buttons state
+  const [copiedScript, setCopiedScript] = useState<string | null>(null);
   const [copiedEnv, setCopiedEnv] = useState(false);
 
-  const envSample = `VITE_SUPABASE_URL="https://your-project.supabase.co"
+  const envSample = `VITE_SUPABASE_URL="${inputUrl || 'https://gygksvqqqtjqgcnwfjha.supabase.co'}"
 VITE_SUPABASE_PUBLISHABLE_KEY="your-anon-or-publishable-key"`;
 
   const runTest = async () => {
@@ -44,39 +62,37 @@ VITE_SUPABASE_PUBLISHABLE_KEY="your-anon-or-publishable-key"`;
     setTesting(false);
   };
 
-  const copyMigrationSQL = async (migrationNum: 1 | 2 | 3) => {
-    const filename =
-      migrationNum === 1
-        ? '/supabase/migrations/01_initial_schema.sql'
-        : migrationNum === 2
-        ? '/supabase/migrations/02_security_and_assignments.sql'
-        : '/supabase/migrations/03_super_admin_provisioning.sql';
+  const handleSaveCredentials = () => {
+    if (!inputUrl.trim() || !inputKey.trim()) {
+      setTestResult({
+        success: false,
+        message: 'يرجى إدخال كل من رابط المشروع ومفتاح الوصول (Anon Key).',
+      });
+      return;
+    }
+    setCustomCredentials(inputUrl.trim(), inputKey.trim());
+    setIsSavedNotice(true);
+    setTimeout(() => setIsSavedNotice(false), 3000);
+    runTest();
+  };
 
+  const handleClearCredentials = () => {
+    clearCustomCredentials();
+    setInputUrl('https://gygksvqqqtjqgcnwfjha.supabase.co');
+    setInputKey('');
+    setTestResult(null);
+  };
+
+  const copyScriptText = async (scriptKey: string, filePath: string) => {
     try {
-      const response = await fetch(filename);
+      const response = await fetch(filePath);
       const text = await response.text();
       await navigator.clipboard.writeText(text);
-      if (migrationNum === 1) {
-        setCopiedMigration(true);
-        setTimeout(() => setCopiedMigration(false), 3000);
-      } else if (migrationNum === 2) {
-        setCopiedMigration2(true);
-        setTimeout(() => setCopiedMigration2(false), 3000);
-      } else {
-        setCopiedMigration3(true);
-        setTimeout(() => setCopiedMigration3(false), 3000);
-      }
+      setCopiedScript(scriptKey);
+      setTimeout(() => setCopiedScript(null), 3000);
     } catch {
-      if (migrationNum === 1) {
-        setCopiedMigration(true);
-        setTimeout(() => setCopiedMigration(false), 3000);
-      } else if (migrationNum === 2) {
-        setCopiedMigration2(true);
-        setTimeout(() => setCopiedMigration2(false), 3000);
-      } else {
-        setCopiedMigration3(true);
-        setTimeout(() => setCopiedMigration3(false), 3000);
-      }
+      setCopiedScript(scriptKey);
+      setTimeout(() => setCopiedScript(null), 3000);
     }
   };
 
@@ -91,7 +107,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY="your-anon-or-publishable-key"`;
       isOpen={isOpen}
       onClose={onClose}
       title="تهيئة وربط قاعدة بيانات Supabase (PostgreSQL & RLS)"
-      description="دليل الربط السريع ونشر مخطط الجداول وسياسات الأمان على مشروع Supabase الخاص بك"
+      description="إدارة الاتصال المباشر، الفحص التشخيصي، وملفات الترحيل التصحيحية لمشروع PSMS"
       maxWidth="2xl"
     >
       <div className="space-y-5 text-xs text-slate-300">
@@ -114,12 +130,17 @@ VITE_SUPABASE_PUBLISHABLE_KEY="your-anon-or-publishable-key"`;
             <div>
               <p className="font-semibold text-sm">
                 {config.isConfigured
-                  ? 'تم العثور على متغيرات Supabase في البيئة'
-                  : 'متغيرات البيئة لـ Supabase غير مضبوطة بعد'}
+                  ? 'اتصال Supabase مهيأ ونشط في المنظومة'
+                  : 'الاتصال المباشر بـ Supabase غير مهيأ بعد (يعمل في وضع التجربة المحلي)'}
               </p>
-              <p className="text-xs text-slate-300 mt-1 font-mono">
-                الرابط: {config.url}
+              <p className="text-xs text-slate-300 mt-1 font-mono break-all">
+                المشروع: {config.url}
               </p>
+              {config.isCustom && (
+                <span className="inline-block mt-1 px-2 py-0.5 rounded text-[10px] bg-blue-900/60 text-blue-300 border border-blue-700">
+                  تم ضبط بيانات الاتصال محلياً من المتصفح
+                </span>
+              )}
             </div>
           </div>
           <Button
@@ -127,7 +148,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY="your-anon-or-publishable-key"`;
             variant="outline"
             onClick={runTest}
             isLoading={testing}
-            className="shrink-0 text-white"
+            className="shrink-0 text-white cursor-pointer"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>اختبار الاتصال</span>
@@ -150,66 +171,151 @@ VITE_SUPABASE_PUBLISHABLE_KEY="your-anon-or-publishable-key"`;
           </div>
         )}
 
-        {/* Step-by-Step Setup Instructions */}
-        <div className="space-y-3 pt-2">
-          <h3 className="text-sm font-semibold text-white">خطوات الربط والتشغيل (خلال دقيقتين):</h3>
-
-          {/* Step 1 */}
-          <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-slate-200">1. إضافة متغيرات البيئة</span>
-              <button
-                onClick={copyEnvSnippet}
-                className="flex items-center gap-1.5 text-blue-400 hover:text-blue-300 cursor-pointer"
-              >
-                {copiedEnv ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedEnv ? 'تم النسخ!' : 'نسخ النموذج'}</span>
-              </button>
+        {/* Section 1: Quick Connect Input */}
+        <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Globe className="w-4 h-4 text-blue-400" />
+              <h3 className="font-semibold text-sm text-white">إعدادات الاتصال بمشروع Supabase (gygksvqqqtjqgcnwfjha):</h3>
             </div>
-            <p className="text-slate-400">
-              قم بإنشاء ملف <code className="text-blue-400">.env</code> أو ضبط المتغيرات في لوحة التحكم:
-            </p>
-            <pre className="p-2 bg-slate-900 border border-slate-800 rounded font-mono text-[11px] text-slate-300 overflow-x-auto">
-              {envSample}
-            </pre>
+            {config.isCustom && (
+              <button
+                type="button"
+                onClick={handleClearCredentials}
+                className="flex items-center gap-1 text-[11px] text-rose-400 hover:text-rose-300 cursor-pointer"
+              >
+                <Trash2 className="w-3 h-3" />
+                <span>إعادة تعيين</span>
+              </button>
+            )}
           </div>
 
-          {/* Step 2 */}
-          <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg space-y-2.5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <span className="font-semibold text-slate-200">2. تنفيذ ملفات الترحيل SQL في Supabase</span>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => copyMigrationSQL(1)}
-                  className="flex items-center gap-1 text-[11px] px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-blue-400 hover:text-blue-300 cursor-pointer"
-                >
-                  {copiedMigration ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                  <span>{copiedMigration ? 'تم النسخ!' : '01 (المخطط)'}</span>
-                </button>
-                <button
-                  onClick={() => copyMigrationSQL(2)}
-                  className="flex items-center gap-1 text-[11px] px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-blue-400 hover:text-blue-300 cursor-pointer"
-                >
-                  {copiedMigration2 ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                  <span>{copiedMigration2 ? 'تم النسخ!' : '02 (الأمان)'}</span>
-                </button>
-                <button
-                  onClick={() => copyMigrationSQL(3)}
-                  className="flex items-center gap-1 text-[11px] px-2.5 py-1 bg-blue-950/70 border border-blue-700 rounded text-blue-300 hover:text-white cursor-pointer font-semibold"
-                >
-                  {copiedMigration3 ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                  <span>{copiedMigration3 ? 'تم النسخ!' : '03 (تعيين السوبر أدمن)'}</span>
-                </button>
-              </div>
+          <div className="grid grid-cols-1 gap-2.5">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                رابط المشروع (Supabase URL):
+              </label>
+              <input
+                type="text"
+                value={inputUrl}
+                onChange={(e) => setInputUrl(e.target.value)}
+                placeholder="https://gygksvqqqtjqgcnwfjha.supabase.co"
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-blue-500"
+              />
             </div>
-            <p className="text-slate-400">
-              افتح <strong>SQL Editor</strong> في لوحة تحكم مشروع Supabase والصق الكود بالترتيب:
-            </p>
-            <ul className="list-disc list-inside space-y-1 text-slate-400 pr-2">
-              <li><strong>ملف 01_initial_schema.sql:</strong> إنشاء 18 جدولاً، الأنواع، وسياسات RLS التأسيسية.</li>
-              <li><strong>ملف 02_security_and_assignments.sql:</strong> تشديد سياسات التكليف الميداني، الفهارس الفريدة، ومحفزات التدقيق التلقائي بالخادم.</li>
-              <li><strong>ملف 03_super_admin_provisioning.sql:</strong> ترقية الحساب الحقيقي إلى مدير عام (Super Admin) بأمان تام وتوثيق التدقيق.</li>
-            </ul>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                مفتاح الوصول العام (Anon / Publishable Key):
+              </label>
+              <input
+                type="password"
+                value={inputKey}
+                onChange={(e) => setInputKey(e.target.value)}
+                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-[11px] text-slate-400">
+              {isSavedNotice ? 'تم حفظ البيانات وتحديث عميل الاتصال بنجاح!' : 'يتم حفظ المفتاح بأمان داخل متصفحك فقط.'}
+            </span>
+            <Button
+              size="sm"
+              onClick={handleSaveCredentials}
+              className="bg-blue-600 hover:bg-blue-500 text-white cursor-pointer"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>حفظ وتفعيل الاتصال</span>
+            </Button>
+          </div>
+        </div>
+
+        {/* Section 2: SQL Scripts for Supabase SQL Editor */}
+        <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-emerald-400" />
+              <h3 className="font-semibold text-sm text-white">ملفات الصيانة والإصلاح في Supabase SQL Editor:</h3>
+            </div>
+          </div>
+          <p className="text-slate-400 text-xs">
+            يمكنك نسخ أي من الملفات التالية ولصقها مباشرة في <strong>SQL Editor</strong> بمشروعك (gygksvqqqtjqgcnwfjha):
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {/* Patch 09 */}
+            <div className="p-2.5 bg-slate-900/90 border border-blue-900/60 rounded-lg flex flex-col justify-between gap-2">
+              <div>
+                <p className="font-semibold text-white text-xs">09_production_readiness_patch.sql</p>
+                <p className="text-[11px] text-blue-300 mt-0.5">
+                  الإصلاح الشامل: يحل تكرار RLS (42P17) وخطأ استخراج الدور (P0001) نهائياً.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => copyScriptText('patch09', '/supabase/migrations/09_production_readiness_patch.sql')}
+                className="w-full flex items-center justify-center gap-1.5 py-1 px-2.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium text-[11px] cursor-pointer"
+              >
+                {copiedScript === 'patch09' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedScript === 'patch09' ? 'تم نسخ ملف 09!' : 'نسخ كود الإصلاح الشامل 09'}</span>
+              </button>
+            </div>
+
+            {/* Diagnostic Check */}
+            <div className="p-2.5 bg-slate-900/90 border border-slate-700 rounded-lg flex flex-col justify-between gap-2">
+              <div>
+                <p className="font-semibold text-white text-xs">diagnostic_check.sql</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  فحص تشخيصي آمن للقراءة فقط: يفحص الجداول، الـ Triggers، والسياسات.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => copyScriptText('diag', '/supabase/diagnostic_check.sql')}
+                className="w-full flex items-center justify-center gap-1.5 py-1 px-2.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-[11px] cursor-pointer"
+              >
+                {copiedScript === 'diag' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedScript === 'diag' ? 'تم نسخ الفحص التشخيصي!' : 'نسخ كود الفحص التشخيصي'}</span>
+              </button>
+            </div>
+
+            {/* Migration 08 */}
+            <div className="p-2.5 bg-slate-900/90 border border-slate-700 rounded-lg flex flex-col justify-between gap-2">
+              <div>
+                <p className="font-semibold text-white text-xs">08_fix_jwt_role_extraction.sql</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  إصلاح استخراج الدور فقط باستخدام auth.role() لدالة إنشاء الموظفين.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => copyScriptText('m08', '/supabase/migrations/08_fix_jwt_role_extraction_in_employee_provisioning.sql')}
+                className="w-full flex items-center justify-center gap-1.5 py-1 px-2.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-[11px] cursor-pointer"
+              >
+                {copiedScript === 'm08' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedScript === 'm08' ? 'تم نسخ ملف 08!' : 'نسخ كود Migration 08'}</span>
+              </button>
+            </div>
+
+            {/* Migration 01 */}
+            <div className="p-2.5 bg-slate-900/90 border border-slate-700 rounded-lg flex flex-col justify-between gap-2">
+              <div>
+                <p className="font-semibold text-white text-xs">01_initial_schema.sql</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  المخطط التأسيسي للجداول (18 جدولاً) في حال كانت القاعدة جديدة كلياً.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => copyScriptText('m01', '/supabase/migrations/01_initial_schema.sql')}
+                className="w-full flex items-center justify-center gap-1.5 py-1 px-2.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-[11px] cursor-pointer"
+              >
+                {copiedScript === 'm01' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedScript === 'm01' ? 'تم نسخ ملف 01!' : 'نسخ المخطط التأسيسي 01'}</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -223,7 +329,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY="your-anon-or-publishable-key"`;
         </div>
 
         <div className="flex justify-end pt-3 border-t border-slate-800">
-          <Button size="sm" onClick={onClose}>
+          <Button size="sm" onClick={onClose} className="cursor-pointer">
             إغلاق
           </Button>
         </div>
