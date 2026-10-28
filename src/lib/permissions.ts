@@ -111,6 +111,21 @@ export function canManageMaintenance(role: UserRole): boolean {
 }
 
 /**
+ * Checks whether user can approve Permits to Work (PTW)
+ * Restricted to super_admin, admin, and supervisor (safety authority)
+ */
+export function canApprovePTW(role: UserRole): boolean {
+  return role === 'super_admin' || role === 'admin' || role === 'supervisor';
+}
+
+/**
+ * Checks whether user can request or issue Permits to Work
+ */
+export function canCreatePTW(role: UserRole): boolean {
+  return true; // Any authenticated station staff can submit a PTW draft
+}
+
+/**
  * Arabic human label for each role
  */
 export function getRoleArabicLabel(role: UserRole): string {

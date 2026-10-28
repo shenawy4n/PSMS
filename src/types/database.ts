@@ -186,17 +186,92 @@ export interface MaintenanceOrder {
   asset_name?: string;
   fault_report_id?: string;
   maintenance_type: MaintenanceType;
+  priority?: TaskPriority;
   status: MaintenanceStatus;
   title: string;
   scope_of_work: string;
   scheduled_start: string;
   scheduled_end: string;
+  actual_start?: string;
+  actual_end?: string;
   lead_technician_id?: string;
   lead_technician_name?: string;
   safety_clearance_number?: string;
   notes?: string;
   created_at: string;
   updated_at: string;
+}
+
+export type PTWWorkType = 
+  | 'electrical_isolation' 
+  | 'hot_work' 
+  | 'height_work' 
+  | 'confined_space' 
+  | 'general';
+
+export type PTWStatus = 
+  | 'draft' 
+  | 'submitted' 
+  | 'approved' 
+  | 'active' 
+  | 'closed' 
+  | 'cancelled';
+
+export interface PermitToWork {
+  id: string;
+  permit_code: string;
+  order_id?: string | null;
+  order_code?: string;
+  station_id: string;
+  station_name?: string;
+  title: string;
+  work_type: PTWWorkType;
+  status: PTWStatus;
+  voltage_level_kv?: number;
+  equipment_isolated: string;
+  loto_applied: boolean;
+  grounding_applied: boolean;
+  zero_voltage_verified: boolean;
+  safety_precautions?: string;
+  requested_by: string;
+  requester_name?: string;
+  approved_by?: string | null;
+  approver_name?: string;
+  valid_from: string;
+  valid_to: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type InsulationTestType = 
+  | 'insulation_resistance' 
+  | 'oil_bdv' 
+  | 'sf6_pressure' 
+  | 'contact_resistance' 
+  | 'tan_delta';
+
+export type TestRating = 'satisfactory' | 'warning' | 'critical';
+
+export interface InsulationTest {
+  id: string;
+  test_code: string;
+  station_id: string;
+  station_name?: string;
+  asset_id?: string | null;
+  asset_name?: string;
+  test_type: InsulationTestType;
+  tested_by: string;
+  tester_name?: string;
+  test_date: string;
+  applied_voltage_kv?: number | null;
+  measured_value: number;
+  measurement_unit: string;
+  temperature_celsius?: number | null;
+  status_rating: TestRating;
+  remarks?: string;
+  recommendations?: string;
+  created_at: string;
 }
 
 export interface AuditLog {

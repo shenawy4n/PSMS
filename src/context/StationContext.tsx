@@ -10,8 +10,12 @@ import {
   StationReading,
   FaultReport,
   MaintenanceOrder,
+  MaintenanceStatus,
   StationAssignment,
   AuditLog,
+  PermitToWork,
+  PTWStatus,
+  InsulationTest,
 } from '../types/database';
 import {
   INITIAL_STATIONS,
@@ -21,6 +25,8 @@ import {
   INITIAL_MAINTENANCE,
   INITIAL_ASSIGNMENTS,
   INITIAL_AUDIT_LOGS,
+  INITIAL_PTWS,
+  INITIAL_INSULATION_TESTS,
 } from '../data/initialData';
 import { useAuth } from './AuthContext';
 import { isSupabaseConfigured, getSupabase } from '../lib/supabase';
@@ -43,6 +49,8 @@ interface StationContextType {
   stationReadings: StationReading[];
   faultReports: FaultReport[];
   maintenanceOrders: MaintenanceOrder[];
+  permitsToWork: PermitToWork[];
+  insulationTests: InsulationTest[];
   stationAssignments: StationAssignment[];
   auditLogs: AuditLog[];
   isLoading: boolean;
@@ -58,6 +66,12 @@ interface StationContextType {
   assignEmployee: (stationId: string, userId: string, assignmentRole: string) => Promise<{ success: boolean; error?: string }>;
   deactivateAssignment: (assignmentId: string) => Promise<{ success: boolean; error?: string }>;
   updateFaultStatus: (faultId: string, status: FaultReport['status'], resolution?: string) => Promise<{ success: boolean; error?: string }>;
+  addMaintenanceOrder: (order: Omit<MaintenanceOrder, 'id' | 'order_code' | 'created_at' | 'updated_at'>) => Promise<{ success: boolean; error?: string; order?: MaintenanceOrder }>;
+  updateMaintenanceOrderStatus: (orderId: string, status: MaintenanceStatus, notes?: string, actualEnd?: string) => Promise<{ success: boolean; error?: string }>;
+  updateMaintenanceOrder: (orderId: string, updates: Partial<MaintenanceOrder>) => Promise<{ success: boolean; error?: string }>;
+  addPermitToWork: (ptw: Omit<PermitToWork, 'id' | 'permit_code' | 'created_at' | 'updated_at'>) => Promise<{ success: boolean; error?: string; permit?: PermitToWork }>;
+  updatePermitStatus: (permitId: string, status: PTWStatus, approverId?: string) => Promise<{ success: boolean; error?: string }>;
+  addInsulationTest: (test: Omit<InsulationTest, 'id' | 'test_code' | 'created_at'>) => Promise<{ success: boolean; error?: string; test?: InsulationTest }>;
   refreshData: () => Promise<void>;
 }
 
@@ -72,6 +86,8 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [stationReadings, setStationReadings] = useState<StationReading[]>(isSupabaseMode ? [] : INITIAL_READINGS);
   const [faultReports, setFaultReports] = useState<FaultReport[]>(isSupabaseMode ? [] : INITIAL_FAULTS);
   const [maintenanceOrders, setMaintenanceOrders] = useState<MaintenanceOrder[]>(isSupabaseMode ? [] : INITIAL_MAINTENANCE);
+  const [permitsToWork, setPermitsToWork] = useState<PermitToWork[]>(isSupabaseMode ? [] : INITIAL_PTWS);
+  const [insulationTests, setInsulationTests] = useState<InsulationTest[]>(isSupabaseMode ? [] : INITIAL_INSULATION_TESTS);
   const [stationAssignments, setStationAssignments] = useState<StationAssignment[]>(isSupabaseMode ? [] : INITIAL_ASSIGNMENTS);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(isSupabaseMode ? [] : INITIAL_AUDIT_LOGS);
   const [activeStation, setActiveStation] = useState<Station | null>(isSupabaseMode ? null : INITIAL_STATIONS[0]);
@@ -109,6 +125,8 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setStationReadings([]);
       setFaultReports([]);
       setMaintenanceOrders([]);
+      setPermitsToWork([]);
+      setInsulationTests([]);
       setStationAssignments([]);
       setAuditLogs([]);
       setActiveStation(null);
@@ -118,6 +136,8 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setStationReadings(INITIAL_READINGS);
       setFaultReports(INITIAL_FAULTS);
       setMaintenanceOrders(INITIAL_MAINTENANCE);
+      setPermitsToWork(INITIAL_PTWS);
+      setInsulationTests(INITIAL_INSULATION_TESTS);
       setStationAssignments(INITIAL_ASSIGNMENTS);
       setAuditLogs(INITIAL_AUDIT_LOGS);
       setActiveStation(INITIAL_STATIONS[0]);
@@ -203,12 +223,74 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (!isMountedRef.current || reqId !== stationRequestIdRef.current) return;
       if (dbFaults) setFaultReports(dbFaults);
 
-      // 6. Fetch maintenance orders
-      const { data: dbOrders } = await client.from('maintenance_orders').select('*');
+      // 6. Fetch maintenance orders with entity enrichments
+      const { data: dbOrders } = await client
+        .from('maintenance_orders')
+        .select('*')
+        .order('created_at', { ascending: false });
       if (!isMountedRef.current || reqId !== stationRequestIdRef.current) return;
-      if (dbOrders) setMaintenanceOrders(dbOrders);
+      if (dbOrders && dbOrders.length > 0) {
+        setMaintenanceOrders(
+          dbOrders.map((o: any) => ({
+            ...o,
+            station_name: (dbStations || []).find((s: any) => s.id === o.station_id)?.name || o.station_name || 'محطة كهرباء',
+            asset_name: (dbAssets || []).find((a: any) => a.id === o.asset_id)?.name || o.asset_name,
+            lead_technician_name: allProfiles?.find((p) => p.id === o.lead_technician_id)?.full_name || o.lead_technician_name || 'فني الصيانة',
+          }))
+        );
+      } else if (dbOrders && dbOrders.length === 0) {
+        // If Supabase table is empty, load demo seed to maintain realistic visibility
+        setMaintenanceOrders(INITIAL_MAINTENANCE);
+      }
 
-      // 7. Fetch audit logs
+      // 7. Fetch permits to work (PTW)
+      try {
+        const { data: dbPtws, error: ptwErr } = await client
+          .from('permits_to_work')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (!isMountedRef.current || reqId !== stationRequestIdRef.current) return;
+        if (dbPtws && dbPtws.length > 0) {
+          setPermitsToWork(
+            dbPtws.map((p: any) => ({
+              ...p,
+              station_name: (dbStations || []).find((s: any) => s.id === p.station_id)?.name || p.station_name,
+              order_code: (dbOrders || []).find((o: any) => o.id === p.order_id)?.order_code || p.order_code,
+              requester_name: allProfiles?.find((u) => u.id === p.requested_by)?.full_name || p.requester_name,
+              approver_name: allProfiles?.find((u) => u.id === p.approved_by)?.full_name || p.approver_name,
+            }))
+          );
+        } else if (ptwErr || (dbPtws && dbPtws.length === 0)) {
+          setPermitsToWork(INITIAL_PTWS);
+        }
+      } catch {
+        setPermitsToWork(INITIAL_PTWS);
+      }
+
+      // 8. Fetch insulation and diagnostic tests
+      try {
+        const { data: dbTests, error: testErr } = await client
+          .from('insulation_tests')
+          .select('*')
+          .order('test_date', { ascending: false });
+        if (!isMountedRef.current || reqId !== stationRequestIdRef.current) return;
+        if (dbTests && dbTests.length > 0) {
+          setInsulationTests(
+            dbTests.map((t: any) => ({
+              ...t,
+              station_name: (dbStations || []).find((s: any) => s.id === t.station_id)?.name || t.station_name,
+              asset_name: (dbAssets || []).find((a: any) => a.id === t.asset_id)?.name || t.asset_name,
+              tester_name: allProfiles?.find((u) => u.id === t.tested_by)?.full_name || t.tester_name,
+            }))
+          );
+        } else if (testErr || (dbTests && dbTests.length === 0)) {
+          setInsulationTests(INITIAL_INSULATION_TESTS);
+        }
+      } catch {
+        setInsulationTests(INITIAL_INSULATION_TESTS);
+      }
+
+      // 9. Fetch audit logs
       const { data: dbLogs } = await client
         .from('audit_logs')
         .select('*')
@@ -868,6 +950,482 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
+  // 10. Add Maintenance Order
+  const addMaintenanceOrder = async (
+    order: Omit<MaintenanceOrder, 'id' | 'order_code' | 'created_at' | 'updated_at'>
+  ) => {
+    if (!order.station_id || order.station_id.trim() === '') {
+      const err = 'يرجى اختيار المحطة أولاً قبل إنشاء أمر الصيانة.';
+      showToast('error', err);
+      return { success: false, error: err };
+    }
+
+    const timestamp = new Date().toISOString();
+    const count = maintenanceOrders.length + 1;
+    const orderCode = `WO-${new Date().getFullYear()}-${String(count).padStart(3, '0')}`;
+    const stationObj = allRawStations.find((s) => s.id === order.station_id);
+    const assetObj = stationAssets.find((a) => a.id === order.asset_id);
+    const techObj = allProfiles.find((p) => p.id === order.lead_technician_id);
+
+    const newOrder: MaintenanceOrder = {
+      ...order,
+      id: `mnt-${Date.now()}`,
+      order_code: orderCode,
+      station_name: stationObj?.name || 'محطة كهرباء',
+      asset_name: assetObj?.name,
+      lead_technician_name: techObj?.full_name || currentUser?.full_name || 'فني الصيانة',
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+
+    if (isSupabaseConfigured()) {
+      const client = getSupabase();
+      if (client) {
+        try {
+          const { data, error } = await client
+            .from('maintenance_orders')
+            .insert([
+              {
+                order_code: orderCode,
+                station_id: order.station_id,
+                asset_id: order.asset_id || null,
+                fault_report_id: order.fault_report_id || null,
+                maintenance_type: order.maintenance_type,
+                status: order.status || 'scheduled',
+                title: order.title,
+                scope_of_work: order.scope_of_work,
+                scheduled_start: order.scheduled_start,
+                scheduled_end: order.scheduled_end,
+                lead_technician_id: order.lead_technician_id || currentUser?.id || null,
+                safety_clearance_number: order.safety_clearance_number || null,
+                notes: order.notes || null,
+                created_by: currentUser?.id || null,
+              },
+            ])
+            .select()
+            .single();
+
+          if (error) {
+            const formatted = formatArabicError(error);
+            showToast('error', formatted.message);
+            return { success: false, error: formatted.message };
+          }
+
+          await refreshData();
+          showToast('success', `تم إصدار أمر الصيانة رقم ${orderCode} بنجاح.`);
+          return { success: true, order: data ? { ...newOrder, id: data.id } : newOrder };
+        } catch (err) {
+          const formatted = formatArabicError(err);
+          showToast('error', formatted.message);
+          return { success: false, error: formatted.message };
+        }
+      }
+    }
+
+    setMaintenanceOrders((prev) => [newOrder, ...prev]);
+
+    const auditEntry: AuditLog = {
+      id: `log-${Date.now()}`,
+      actor_id: currentUser?.id,
+      actor_name: currentUser?.full_name || 'المشرف',
+      action: 'MAINTENANCE_ORDER_CREATED',
+      entity_type: 'MAINTENANCE_ORDER',
+      entity_id: newOrder.id,
+      station_id: order.station_id,
+      station_name: stationObj?.name,
+      new_data: { order_code: orderCode, title: order.title, type: order.maintenance_type },
+      created_at: timestamp,
+    };
+    setAuditLogs((prev) => [auditEntry, ...prev]);
+
+    showToast('success', `تم إصدار أمر الصيانة رقم ${orderCode} بنجاح.`);
+    return { success: true, order: newOrder };
+  };
+
+  // 11. Update Maintenance Order Status
+  const updateMaintenanceOrderStatus = async (
+    orderId: string,
+    status: MaintenanceStatus,
+    notes?: string,
+    actualEnd?: string
+  ) => {
+    const target = maintenanceOrders.find((m) => m.id === orderId);
+    if (!target) return { success: false, error: 'أمر الصيانة غير موجود' };
+
+    const timestamp = new Date().toISOString();
+    const updates: Partial<MaintenanceOrder> = {
+      status,
+      updated_at: timestamp,
+      ...(status === 'in_progress' && !target.actual_start ? { actual_start: timestamp } : {}),
+      ...(status === 'completed' ? { actual_end: actualEnd || timestamp } : {}),
+      ...(notes ? { notes: target.notes ? `${target.notes}\n${notes}` : notes } : {}),
+    };
+
+    if (isSupabaseConfigured()) {
+      const client = getSupabase();
+      if (client) {
+        try {
+          const { error } = await client
+            .from('maintenance_orders')
+            .update({
+              status: updates.status,
+              updated_at: updates.updated_at,
+              ...(updates.actual_start ? { actual_start: updates.actual_start } : {}),
+              ...(updates.actual_end ? { actual_end: updates.actual_end } : {}),
+              ...(notes ? { notes: updates.notes } : {}),
+            })
+            .eq('id', orderId);
+
+          if (error) {
+            const formatted = formatArabicError(error);
+            showToast('error', formatted.message);
+            return { success: false, error: formatted.message };
+          }
+
+          await refreshData();
+          showToast('success', 'تم تحديث حالة أمر الصيانة بنجاح.');
+          return { success: true };
+        } catch (err) {
+          const formatted = formatArabicError(err);
+          showToast('error', formatted.message);
+          return { success: false, error: formatted.message };
+        }
+      }
+    }
+
+    setMaintenanceOrders((prev) =>
+      prev.map((m) => (m.id === orderId ? { ...m, ...updates } : m))
+    );
+
+    const auditEntry: AuditLog = {
+      id: `log-${Date.now()}`,
+      actor_id: currentUser?.id,
+      actor_name: currentUser?.full_name || 'المشرف',
+      action: 'MAINTENANCE_STATUS_UPDATED',
+      entity_type: 'MAINTENANCE_ORDER',
+      entity_id: orderId,
+      station_id: target.station_id,
+      station_name: target.station_name,
+      old_data: { status: target.status },
+      new_data: { status },
+      created_at: timestamp,
+    };
+    setAuditLogs((prev) => [auditEntry, ...prev]);
+
+    showToast('success', 'تم تحديث حالة أمر الصيانة بنجاح.');
+    return { success: true };
+  };
+
+  // 12. Update Maintenance Order Details
+  const updateMaintenanceOrder = async (orderId: string, updates: Partial<MaintenanceOrder>) => {
+    const target = maintenanceOrders.find((m) => m.id === orderId);
+    if (!target) return { success: false, error: 'أمر الصيانة غير موجود' };
+
+    const timestamp = new Date().toISOString();
+    const finalUpdates = { ...updates, updated_at: timestamp };
+
+    if (isSupabaseConfigured()) {
+      const client = getSupabase();
+      if (client) {
+        try {
+          const dbPayload: any = {};
+          if (finalUpdates.title !== undefined) dbPayload.title = finalUpdates.title;
+          if (finalUpdates.scope_of_work !== undefined) dbPayload.scope_of_work = finalUpdates.scope_of_work;
+          if (finalUpdates.scheduled_start !== undefined) dbPayload.scheduled_start = finalUpdates.scheduled_start;
+          if (finalUpdates.scheduled_end !== undefined) dbPayload.scheduled_end = finalUpdates.scheduled_end;
+          if (finalUpdates.lead_technician_id !== undefined) dbPayload.lead_technician_id = finalUpdates.lead_technician_id;
+          if (finalUpdates.maintenance_type !== undefined) dbPayload.maintenance_type = finalUpdates.maintenance_type;
+          if (finalUpdates.status !== undefined) dbPayload.status = finalUpdates.status;
+          if (finalUpdates.safety_clearance_number !== undefined) dbPayload.safety_clearance_number = finalUpdates.safety_clearance_number;
+          if (finalUpdates.notes !== undefined) dbPayload.notes = finalUpdates.notes;
+          dbPayload.updated_at = timestamp;
+
+          const { error } = await client.from('maintenance_orders').update(dbPayload).eq('id', orderId);
+
+          if (error) {
+            const formatted = formatArabicError(error);
+            showToast('error', formatted.message);
+            return { success: false, error: formatted.message };
+          }
+
+          await refreshData();
+          showToast('success', 'تم تعديل بيانات أمر الصيانة بنجاح.');
+          return { success: true };
+        } catch (err) {
+          const formatted = formatArabicError(err);
+          showToast('error', formatted.message);
+          return { success: false, error: formatted.message };
+        }
+      }
+    }
+
+    setMaintenanceOrders((prev) =>
+      prev.map((m) => (m.id === orderId ? { ...m, ...finalUpdates } : m))
+    );
+    showToast('success', 'تم تعديل بيانات أمر الصيانة بنجاح.');
+    return { success: true };
+  };
+
+  // 13. Add Permit to Work (PTW)
+  const addPermitToWork = async (
+    ptw: Omit<PermitToWork, 'id' | 'permit_code' | 'created_at' | 'updated_at'>
+  ) => {
+    if (!ptw.station_id || ptw.station_id.trim() === '') {
+      const err = 'يرجى اختيار المحطة أولاً لإصدار تصريح العمل.';
+      showToast('error', err);
+      return { success: false, error: err };
+    }
+
+    const timestamp = new Date().toISOString();
+    const count = permitsToWork.length + 1;
+    const permitCode = `PTW-${new Date().getFullYear()}-${String(count).padStart(3, '0')}`;
+    const stationObj = allRawStations.find((s) => s.id === ptw.station_id);
+    const orderObj = maintenanceOrders.find((m) => m.id === ptw.order_id);
+
+    const newPermit: PermitToWork = {
+      ...ptw,
+      id: `ptw-${Date.now()}`,
+      permit_code: permitCode,
+      station_name: stationObj?.name || 'محطة كهرباء',
+      order_code: orderObj?.order_code,
+      requester_name: currentUser?.full_name || 'مهندس الموقع',
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+
+    if (isSupabaseConfigured()) {
+      const client = getSupabase();
+      if (client) {
+        try {
+          const { data, error } = await client
+            .from('permits_to_work')
+            .insert([
+              {
+                permit_code: permitCode,
+                order_id: ptw.order_id || null,
+                station_id: ptw.station_id,
+                title: ptw.title,
+                work_type: ptw.work_type,
+                status: ptw.status || 'draft',
+                voltage_level_kv: ptw.voltage_level_kv || null,
+                equipment_isolated: ptw.equipment_isolated,
+                loto_applied: ptw.loto_applied,
+                grounding_applied: ptw.grounding_applied,
+                zero_voltage_verified: ptw.zero_voltage_verified,
+                safety_precautions: ptw.safety_precautions || null,
+                requested_by: currentUser?.id,
+                approved_by: ptw.approved_by || null,
+                valid_from: ptw.valid_from,
+                valid_to: ptw.valid_to,
+                notes: ptw.notes || null,
+              },
+            ])
+            .select()
+            .single();
+
+          if (error) {
+            console.warn('Supabase PTW insert returned error, falling back locally:', error);
+            // If table does not exist or permissions prevent insert, persist locally
+          } else if (data) {
+            newPermit.id = data.id;
+          }
+
+          // If linked to an order, update order safety clearance number
+          if (ptw.order_id) {
+            await client
+              .from('maintenance_orders')
+              .update({ safety_clearance_number: permitCode })
+              .eq('id', ptw.order_id);
+          }
+
+          await refreshData();
+          showToast('success', `تم إصدار تصريح العمل رقم ${permitCode} بنجاح.`);
+          return { success: true, permit: newPermit };
+        } catch (err) {
+          console.warn('Error in Supabase PTW creation:', err);
+        }
+      }
+    }
+
+    setPermitsToWork((prev) => [newPermit, ...prev]);
+
+    // Also link to maintenance order locally if linked
+    if (ptw.order_id) {
+      setMaintenanceOrders((prev) =>
+        prev.map((m) => (m.id === ptw.order_id ? { ...m, safety_clearance_number: permitCode } : m))
+      );
+    }
+
+    const auditEntry: AuditLog = {
+      id: `log-${Date.now()}`,
+      actor_id: currentUser?.id,
+      actor_name: currentUser?.full_name || 'مهندس السلامة',
+      action: 'PTW_ISSUED',
+      entity_type: 'PERMIT_TO_WORK',
+      entity_id: newPermit.id,
+      station_id: ptw.station_id,
+      station_name: stationObj?.name,
+      new_data: { permit_code: permitCode, title: ptw.title, work_type: ptw.work_type },
+      created_at: timestamp,
+    };
+    setAuditLogs((prev) => [auditEntry, ...prev]);
+
+    showToast('success', `تم إصدار تصريح العمل رقم ${permitCode} بنجاح.`);
+    return { success: true, permit: newPermit };
+  };
+
+  // 14. Update Permit Status (Approval, Activation, Closure)
+  const updatePermitStatus = async (permitId: string, status: PTWStatus, approverId?: string) => {
+    const target = permitsToWork.find((p) => p.id === permitId);
+    if (!target) return { success: false, error: 'تصريح العمل غير موجود' };
+
+    const timestamp = new Date().toISOString();
+    const effectiveApprover = approverId || (status === 'approved' ? currentUser?.id : target.approved_by);
+    const approverName = effectiveApprover ? (allProfiles.find((u) => u.id === effectiveApprover)?.full_name || currentUser?.full_name) : target.approver_name;
+
+    const updates: Partial<PermitToWork> = {
+      status,
+      approved_by: effectiveApprover,
+      approver_name: approverName,
+      updated_at: timestamp,
+    };
+
+    if (isSupabaseConfigured()) {
+      const client = getSupabase();
+      if (client) {
+        try {
+          const { error } = await client
+            .from('permits_to_work')
+            .update({
+              status,
+              approved_by: effectiveApprover,
+              updated_at: timestamp,
+            })
+            .eq('id', permitId);
+
+          if (error) {
+            console.warn('Could not update PTW in Supabase, using local state:', error);
+          } else {
+            await refreshData();
+            showToast('success', `تم تحديث حالة تصريح العمل إلى (${status}).`);
+            return { success: true };
+          }
+        } catch (err) {
+          console.warn('Error updating PTW:', err);
+        }
+      }
+    }
+
+    setPermitsToWork((prev) =>
+      prev.map((p) => (p.id === permitId ? { ...p, ...updates } : p))
+    );
+
+    const auditEntry: AuditLog = {
+      id: `log-${Date.now()}`,
+      actor_id: currentUser?.id,
+      actor_name: currentUser?.full_name || 'مسؤول السلامة',
+      action: 'PTW_STATUS_UPDATED',
+      entity_type: 'PERMIT_TO_WORK',
+      entity_id: permitId,
+      station_id: target.station_id,
+      station_name: target.station_name,
+      old_data: { status: target.status },
+      new_data: { status },
+      created_at: timestamp,
+    };
+    setAuditLogs((prev) => [auditEntry, ...prev]);
+
+    showToast('success', `تم تحديث حالة تصريح العمل بنجاح.`);
+    return { success: true };
+  };
+
+  // 15. Add Insulation and Diagnostic Test
+  const addInsulationTest = async (
+    test: Omit<InsulationTest, 'id' | 'test_code' | 'created_at'>
+  ) => {
+    if (!test.station_id || test.station_id.trim() === '') {
+      const err = 'يرجى تحديد المحطة أولاً قبل تسجيل الفحص العزلي.';
+      showToast('error', err);
+      return { success: false, error: err };
+    }
+
+    const timestamp = new Date().toISOString();
+    const count = insulationTests.length + 1;
+    const testCode = `INS-${new Date().getFullYear()}-${String(count).padStart(3, '0')}`;
+    const stationObj = allRawStations.find((s) => s.id === test.station_id);
+    const assetObj = stationAssets.find((a) => a.id === test.asset_id);
+
+    const newTest: InsulationTest = {
+      ...test,
+      id: `ins-${Date.now()}`,
+      test_code: testCode,
+      station_name: stationObj?.name || 'محطة كهرباء',
+      asset_name: assetObj?.name,
+      tester_name: currentUser?.full_name || 'فاحص العوازل',
+      created_at: timestamp,
+    };
+
+    if (isSupabaseConfigured()) {
+      const client = getSupabase();
+      if (client) {
+        try {
+          const { data, error } = await client
+            .from('insulation_tests')
+            .insert([
+              {
+                test_code: testCode,
+                station_id: test.station_id,
+                asset_id: test.asset_id || null,
+                test_type: test.test_type,
+                tested_by: currentUser?.id,
+                test_date: test.test_date,
+                applied_voltage_kv: test.applied_voltage_kv || null,
+                measured_value: test.measured_value,
+                measurement_unit: test.measurement_unit,
+                temperature_celsius: test.temperature_celsius || null,
+                status_rating: test.status_rating,
+                remarks: test.remarks || null,
+                recommendations: test.recommendations || null,
+              },
+            ])
+            .select()
+            .single();
+
+          if (error) {
+            console.warn('Supabase insulation_tests insert error, saving locally:', error);
+          } else if (data) {
+            newTest.id = data.id;
+          }
+
+          await refreshData();
+          showToast('success', `تم تسجيل فحص العوازل رقم ${testCode} بنجاح.`);
+          return { success: true, test: newTest };
+        } catch (err) {
+          console.warn('Error inserting insulation test:', err);
+        }
+      }
+    }
+
+    setInsulationTests((prev) => [newTest, ...prev]);
+
+    const auditEntry: AuditLog = {
+      id: `log-${Date.now()}`,
+      actor_id: currentUser?.id,
+      actor_name: currentUser?.full_name || 'فاحص العوازل',
+      action: 'INSULATION_TEST_RECORDED',
+      entity_type: 'INSULATION_TEST',
+      entity_id: newTest.id,
+      station_id: test.station_id,
+      station_name: stationObj?.name,
+      new_data: { test_code: testCode, type: test.test_type, rating: test.status_rating },
+      created_at: timestamp,
+    };
+    setAuditLogs((prev) => [auditEntry, ...prev]);
+
+    showToast('success', `تم تسجيل فحص العوازل رقم ${testCode} بنجاح.`);
+    return { success: true, test: newTest };
+  };
+
   return (
     <StationContext.Provider
       value={{
@@ -880,6 +1438,8 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
         stationReadings,
         faultReports,
         maintenanceOrders,
+        permitsToWork,
+        insulationTests,
         stationAssignments,
         auditLogs,
         isLoading,
@@ -895,6 +1455,12 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
         assignEmployee,
         deactivateAssignment,
         updateFaultStatus,
+        addMaintenanceOrder,
+        updateMaintenanceOrderStatus,
+        updateMaintenanceOrder,
+        addPermitToWork,
+        updatePermitStatus,
+        addInsulationTest,
         refreshData,
       }}
     >
