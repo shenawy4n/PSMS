@@ -597,6 +597,12 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // 6. Add Reading
   const addReading = async (reading: Omit<StationReading, 'id' | 'created_at'>) => {
+    if (!reading.station_id || reading.station_id.trim() === '') {
+      const err = 'يرجى اختيار المحطة أولاً قبل تسجيل القراءة.';
+      showToast('error', err);
+      return { success: false, error: err };
+    }
+
     const timestamp = new Date().toISOString();
     const newReading: StationReading = {
       ...reading,
@@ -615,13 +621,13 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
               reading_timestamp: reading.reading_timestamp,
               voltage_kv: reading.voltage_kv,
               active_power_mw: reading.active_power_mw,
-              reactive_power_mvar: reading.reactive_power_mvar,
+              reactive_power_mvar: reading.reactive_power_mvar ?? null,
               frequency_hz: reading.frequency_hz,
               power_factor: reading.power_factor,
-              transformer_temp_celsius: reading.transformer_temp_celsius,
-              sf6_gas_pressure_bar: reading.sf6_gas_pressure_bar,
+              transformer_temp_celsius: reading.transformer_temp_celsius ?? null,
+              sf6_gas_pressure_bar: reading.sf6_gas_pressure_bar ?? null,
               is_anomaly: reading.is_anomaly,
-              anomaly_notes: reading.anomaly_notes,
+              anomaly_notes: reading.anomaly_notes || null,
             },
           ]);
 
@@ -654,6 +660,12 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // 7. Add Fault Report
   const addFaultReport = async (fault: Omit<FaultReport, 'id' | 'report_code' | 'created_at' | 'updated_at'>) => {
+    if (!fault.station_id || fault.station_id.trim() === '') {
+      const err = 'يرجى اختيار المحطة أولاً قبل تسجيل البلاغ.';
+      showToast('error', err);
+      return { success: false, error: err };
+    }
+
     const timestamp = new Date().toISOString();
     const count = faultReports.length + 1;
     const reportCode = `FLT-${new Date().getFullYear()}-${String(count).padStart(3, '0')}`;
@@ -674,7 +686,7 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
             {
               report_code: reportCode,
               station_id: fault.station_id,
-              asset_id: fault.asset_id,
+              asset_id: fault.asset_id && fault.asset_id.trim() !== '' ? fault.asset_id : null,
               reported_by: currentUser?.id,
               title: fault.title,
               description: fault.description,

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useStations } from '../../context/StationContext';
 import { useAuth } from '../../context/AuthContext';
 import { Modal } from '../ui/Modal';
@@ -47,13 +47,32 @@ export const AssignEmployeeModal: React.FC<AssignEmployeeModalProps> = ({
     return [];
   }, [allProfiles, role]);
 
-  const [stationId, setStationId] = useState<string>(
-    defaultStationId || permittedStations[0]?.id || ''
-  );
-  const [userId, setUserId] = useState<string>(permittedProfiles[0]?.id || '');
+  const [stationId, setStationId] = useState<string>('');
+  const [userId, setUserId] = useState<string>('');
   const [roleTitle, setRoleTitle] = useState('مهندس تحكم ومناوبة موقعي');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Synchronize selection state when modal opens or available stations/profiles update
+  useEffect(() => {
+    if (isOpen) {
+      if (defaultStationId && permittedStations.some((s) => s.id === defaultStationId)) {
+        setStationId(defaultStationId);
+      } else if (permittedStations.length > 0) {
+        setStationId((prev) => (permittedStations.some((s) => s.id === prev) ? prev : permittedStations[0].id));
+      } else {
+        setStationId('');
+      }
+
+      if (permittedProfiles.length > 0) {
+        setUserId((prev) => (permittedProfiles.some((p) => p.id === prev) ? prev : permittedProfiles[0].id));
+      } else {
+        setUserId('');
+      }
+
+      setError(null);
+    }
+  }, [isOpen, defaultStationId, permittedStations, permittedProfiles]);
 
   // Check if selected candidate is already assigned to the selected station
   const isAlreadyAssigned = useMemo(() => {

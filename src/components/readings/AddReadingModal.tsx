@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStations } from '../../context/StationContext';
 import { useAuth } from '../../context/AuthContext';
 import { readingFormSchema } from '../../lib/validations/employee';
@@ -25,7 +25,7 @@ export const AddReadingModal: React.FC<AddReadingModalProps> = ({
   const { stations, addReading } = useStations();
   const { currentUser } = useAuth();
 
-  const [stationId, setStationId] = useState<string>(defaultStationId || stations[0]?.id || '');
+  const [stationId, setStationId] = useState<string>('');
   const [voltage, setVoltage] = useState<string>('132.0');
   const [loadMW, setLoadMW] = useState<string>('85.4');
   const [reactiveMVAR, setReactiveMVAR] = useState<string>('15.2');
@@ -39,9 +39,28 @@ export const AddReadingModal: React.FC<AddReadingModalProps> = ({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Synchronize stationId reliably whenever the modal opens, or when defaultStationId or stations change
+  useEffect(() => {
+    if (isOpen) {
+      if (defaultStationId && stations.some((s) => s.id === defaultStationId)) {
+        setStationId(defaultStationId);
+      } else if (stations.length > 0) {
+        setStationId((prev) => (stations.some((s) => s.id === prev) ? prev : stations[0].id));
+      } else {
+        setStationId('');
+      }
+      setErrors({});
+    }
+  }, [isOpen, defaultStationId, stations]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({});
+
+    if (stations.length === 0) {
+      setErrors({ form: 'لا توجد محطات متاحة أو مصرح لك بالوصول إليها حالياً. يرجى مراجعة إدارة المنظومة للتأكد من صلاحيات حسابك ومحطاتك المسندة.' });
+      return;
+    }
 
     const payload = {
       station_id: stationId,
@@ -69,7 +88,7 @@ export const AddReadingModal: React.FC<AddReadingModalProps> = ({
     setIsSubmitting(true);
     const selectedStn = stations.find((s) => s.id === stationId);
 
-    await addReading({
+    const res = await addReading({
       ...payload,
       station_code: selectedStn?.code,
       station_name: selectedStn?.name,
@@ -79,6 +98,12 @@ export const AddReadingModal: React.FC<AddReadingModalProps> = ({
     });
 
     setIsSubmitting(false);
+
+    if (!res.success) {
+      setErrors({ form: res.error || 'تعذر تسجيل القراءة في قاعدة البيانات' });
+      return;
+    }
+
     onClose();
   };
 
@@ -91,13 +116,26 @@ export const AddReadingModal: React.FC<AddReadingModalProps> = ({
       maxWidth="xl"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
-        <Select
-          label="المحطة المستهدفة"
-          value={stationId}
-          onChange={(e) => setStationId(e.target.value)}
-          options={stations.map((s) => ({ value: s.id, label: `${s.code} - ${s.name}` }))}
-          error={errors.station_id}
-        />
+        {errors.form && (
+          <div className="p-3 bg-rose-950/60 border border-rose-800 text-rose-300 text-xs rounded-lg">
+            {errors.form}
+          </div>
+        )}
+
+        {stations.length === 0 ? (
+          <div className="p-3 bg-amber-950/60 border border-amber-800 text-amber-300 text-xs rounded-lg">
+            تنبيه: لا توجد أي محطات مصرح لحسابك بالوصول إليها حالياً. لا يمكن تسجيل قراءة عداد دون محطة مسندة.
+          </div>
+        ) : (
+          <Select
+            label="المحطة المستهدفة"
+            value={stationId}
+            onChange={(e) => setStationId(e.target.value)}
+            options={stations.map((s) => ({ value: s.id, label: `${s.code} - ${s.name}` }))}
+            error={errors.station_id}
+            required
+          />
+        )}
 
         <div className="grid grid-cols-2 gap-4">
           <Input
@@ -196,7 +234,12 @@ export const AddReadingModal: React.FC<AddReadingModalProps> = ({
           <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={isSubmitting}>
             إلغاء
           </Button>
-          <Button type="submit" size="sm" isLoading={isSubmitting}>
+          <Button
+            type="submit"
+            size="sm"
+            isLoading={isSubmitting}
+            disabled={stations.length === 0}
+          >
             حفظ واعتماد القراءة
           </Button>
         </div>

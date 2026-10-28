@@ -38,7 +38,7 @@ export const employeeFormSchema = z.object({
 export type EmployeeFormInput = z.infer<typeof employeeFormSchema>;
 
 export const readingFormSchema = z.object({
-  station_id: z.string().min(1, 'يرجى اختيار المحطة'),
+  station_id: z.string().trim().min(1, 'يرجى اختيار المحطة'),
   voltage_kv: z.coerce.number().positive('قيمة الجهد يجب أن تكون موجبة'),
   active_power_mw: z.coerce.number().min(0, 'الحمل الفعال لا يمكن أن يكون سالباً'),
   reactive_power_mvar: z.coerce.number().optional(),
@@ -59,7 +59,7 @@ export const readingFormSchema = z.object({
 export type ReadingFormInput = z.infer<typeof readingFormSchema>;
 
 export const faultReportSchema = z.object({
-  station_id: z.string().min(1, 'يرجى تحديد المحطة'),
+  station_id: z.string().trim().min(1, 'يرجى اختيار المحطة'),
   asset_id: z.string().optional(),
   title: z.string().trim().min(4, 'عنوان البلاغ يجب أن لا يقل عن 4 أحرف'),
   description: z.string().trim().min(10, 'يرجى كتابة تفاصيل وافية عن العطل والظروف التشغيلية'),

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStations } from '../../context/StationContext';
 import { useAuth } from '../../context/AuthContext';
 import { faultReportSchema } from '../../lib/validations/employee';
@@ -26,7 +26,7 @@ export const AddFaultModal: React.FC<AddFaultModalProps> = ({
   const { stations, addFaultReport, stationAssets } = useStations();
   const { currentUser } = useAuth();
 
-  const [stationId, setStationId] = useState<string>(defaultStationId || stations[0]?.id || '');
+  const [stationId, setStationId] = useState<string>('');
   const [assetId, setAssetId] = useState<string>('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -34,11 +34,34 @@ export const AddFaultModal: React.FC<AddFaultModalProps> = ({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Synchronize stationId reliably whenever the modal opens, or when defaultStationId or stations change
+  useEffect(() => {
+    if (isOpen) {
+      if (defaultStationId && stations.some((s) => s.id === defaultStationId)) {
+        setStationId(defaultStationId);
+      } else if (stations.length > 0) {
+        setStationId((prev) => (stations.some((s) => s.id === prev) ? prev : stations[0].id));
+      } else {
+        setStationId('');
+      }
+      setAssetId('');
+      setTitle('');
+      setDescription('');
+      setSeverity('medium');
+      setErrors({});
+    }
+  }, [isOpen, defaultStationId, stations]);
+
   const availableAssets = stationAssets.filter((a) => a.station_id === stationId);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({});
+
+    if (stations.length === 0) {
+      setErrors({ form: 'لا توجد محطات متاحة أو مصرح لك بالوصول إليها حالياً. يرجى مراجعة إدارة المنظومة للتأكد من صلاحيات حسابك ومحطاتك المسندة.' });
+      return;
+    }
 
     const payload = {
       station_id: stationId,
@@ -62,7 +85,7 @@ export const AddFaultModal: React.FC<AddFaultModalProps> = ({
     const selectedStn = stations.find((s) => s.id === stationId);
     const selectedAsset = availableAssets.find((a) => a.id === assetId);
 
-    await addFaultReport({
+    const res = await addFaultReport({
       station_id: stationId,
       station_name: selectedStn?.name,
       station_code: selectedStn?.code,
@@ -78,6 +101,12 @@ export const AddFaultModal: React.FC<AddFaultModalProps> = ({
     });
 
     setIsSubmitting(false);
+
+    if (!res.success) {
+      setErrors({ form: res.error || 'تعذر تسجيل البلاغ في قاعدة البيانات' });
+      return;
+    }
+
     onClose();
   };
 
@@ -90,16 +119,29 @@ export const AddFaultModal: React.FC<AddFaultModalProps> = ({
       maxWidth="lg"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
-        <Select
-          label="المحطة المتأثرة"
-          value={stationId}
-          onChange={(e) => {
-            setStationId(e.target.value);
-            setAssetId('');
-          }}
-          options={stations.map((s) => ({ value: s.id, label: `${s.code} - ${s.name}` }))}
-          error={errors.station_id}
-        />
+        {errors.form && (
+          <div className="p-3 bg-rose-950/60 border border-rose-800 text-rose-300 text-xs rounded-lg">
+            {errors.form}
+          </div>
+        )}
+
+        {stations.length === 0 ? (
+          <div className="p-3 bg-amber-950/60 border border-amber-800 text-amber-300 text-xs rounded-lg">
+            تنبيه: لا توجد أي محطات مصرح لحسابك بالوصول إليها حالياً. لا يمكن تسجيل بلاغ عطل دون محطة مسندة.
+          </div>
+        ) : (
+          <Select
+            label="المحطة المتأثرة"
+            value={stationId}
+            onChange={(e) => {
+              setStationId(e.target.value);
+              setAssetId('');
+            }}
+            options={stations.map((s) => ({ value: s.id, label: `${s.code} - ${s.name}` }))}
+            error={errors.station_id}
+            required
+          />
+        )}
 
         {availableAssets.length > 0 && (
           <Select
@@ -155,7 +197,13 @@ export const AddFaultModal: React.FC<AddFaultModalProps> = ({
           <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={isSubmitting}>
             إلغاء
           </Button>
-          <Button type="submit" variant="danger" size="sm" isLoading={isSubmitting}>
+          <Button
+            type="submit"
+            variant="danger"
+            size="sm"
+            isLoading={isSubmitting}
+            disabled={stations.length === 0}
+          >
             إرسال البلاغ لمركز التحكم
           </Button>
         </div>
