@@ -26,6 +26,7 @@ import { useAuth } from './AuthContext';
 import { isSupabaseConfigured, getSupabase } from '../lib/supabase';
 import { canAccessStation, canAssignPersonnel, canEditStation } from '../lib/permissions';
 import { formatArabicError } from '../lib/errorHandler';
+import { getRegionByGovernorate, toStationDatabasePayload } from '../lib/validations/station';
 
 interface ToastNotification {
   type: 'success' | 'error' | 'info';
@@ -158,11 +159,18 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
           showToast('error', `تعذر جلب بيانات المحطات من Supabase: ${stnError.message}`);
         }
       } else if (dbStations) {
-        const mapped: Station[] = dbStations.map((s: any) => ({
-          ...s,
-          organization_name: s.organizations?.name || s.organization_name || '',
-        }));
-        setAllRawStations(mapped);
+        setAllRawStations((prev) =>
+          dbStations.map((s: any) => {
+            const existing = prev.find((item) => item.id === s.id);
+            return {
+              ...s,
+              region: s.region || existing?.region || getRegionByGovernorate(s.governorate),
+              organization_name: s.organizations?.name || s.organization_name || '',
+              assigned_personnel_count: existing?.assigned_personnel_count ?? 0,
+              open_faults_count: existing?.open_faults_count ?? 0,
+            };
+          })
+        );
       }
 
       // 2. Fetch assignments
@@ -301,8 +309,8 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 region_id: null,
                 governorate: input.governorate,
                 address: input.address,
-                latitude: input.latitude,
-                longitude: input.longitude,
+                latitude: typeof input.latitude === 'number' && !Number.isNaN(input.latitude) ? input.latitude : null,
+                longitude: typeof input.longitude === 'number' && !Number.isNaN(input.longitude) ? input.longitude : null,
                 voltage_level_kv: input.voltage_level_kv,
                 installed_capacity_mw: input.installed_capacity_mw,
                 status: input.status,
@@ -321,6 +329,7 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
           const createdStation: Station = {
             ...(data as any),
+            region: input.region || getRegionByGovernorate(data.governorate),
             organization_name: (data as any)?.organizations?.name || input.organization_name || '',
             assigned_personnel_count: 0,
             open_faults_count: 0,
@@ -374,15 +383,49 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const client = getSupabase();
       if (client) {
         try {
+          // Whitelist strictly the valid database columns of public.stations
+          // PostgREST rejects any payload containing non-existent columns (such as 'region')
+          const dbPayload = toStationDatabasePayload(updates as Record<string, unknown>, timestamp);
+
           const { error } = await client
             .from('stations')
-            .update({ ...updates, updated_at: timestamp })
+            .update(dbPayload)
             .eq('id', id);
 
           if (error) {
             const formatted = formatArabicError(error);
             showToast('error', formatted.message);
             return { success: false, error: formatted.message };
+          }
+
+          const resolvedRegion =
+            updates.region ||
+            (updates.governorate ? getRegionByGovernorate(updates.governorate) : current?.region);
+
+          setAllRawStations((prev) =>
+            prev.map((s) =>
+              s.id === id
+                ? {
+                    ...s,
+                    ...updates,
+                    region: resolvedRegion || s.region || getRegionByGovernorate(updates.governorate || s.governorate),
+                    updated_at: timestamp,
+                  }
+                : s
+            )
+          );
+
+          if (activeStation && activeStation.id === id) {
+            setActiveStation((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    ...updates,
+                    region: resolvedRegion || prev.region || getRegionByGovernorate(updates.governorate || prev.governorate),
+                    updated_at: timestamp,
+                  }
+                : null
+            );
           }
 
           await refreshData();
@@ -396,12 +439,34 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
+    const resolvedRegionFallback =
+      updates.region ||
+      (updates.governorate ? getRegionByGovernorate(updates.governorate) : current?.region);
+
     setAllRawStations((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, ...updates, updated_at: timestamp } : s))
+      prev.map((s) =>
+        s.id === id
+          ? {
+              ...s,
+              ...updates,
+              region: resolvedRegionFallback || s.region || getRegionByGovernorate(updates.governorate || s.governorate),
+              updated_at: timestamp,
+            }
+          : s
+      )
     );
 
     if (activeStation && activeStation.id === id) {
-      setActiveStation((prev) => (prev ? { ...prev, ...updates, updated_at: timestamp } : null));
+      setActiveStation((prev) =>
+        prev
+          ? {
+              ...prev,
+              ...updates,
+              region: resolvedRegionFallback || prev.region || getRegionByGovernorate(updates.governorate || prev.governorate),
+              updated_at: timestamp,
+            }
+          : null
+      );
     }
 
     const auditEntry: AuditLog = {
@@ -423,6 +488,7 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
     showToast('success', 'تم حفظ التعديلات بنجاح.');
     return { success: true };
   };
+
 
   // 3. Station Archival / Deactivation workflow (Safe alternative to hard deletion)
   const archiveStation = async (id: string, reason = 'أرشفة وإخراج من الخدمة بقرار تشغيلي') => {

@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Station, StationStatus, StationType } from '../../types/database';
-import { stationFormSchema, StationFormInput } from '../../lib/validations/station';
+import { stationFormSchema, StationFormInput, getRegionByGovernorate } from '../../lib/validations/station';
 import { useStations } from '../../context/StationContext';
 import { useAuth } from '../../context/AuthContext';
 import { isSupabaseConfigured, getSupabase } from '../../lib/supabase';
@@ -123,7 +123,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
         code: initialStation.code,
         name: initialStation.name,
         type: initialStation.type,
-        region: initialStation.region,
+        region: initialStation.region || getRegionByGovernorate(initialStation.governorate),
         governorate: initialStation.governorate,
         address: initialStation.address,
         voltage_level_kv: initialStation.voltage_level_kv,
