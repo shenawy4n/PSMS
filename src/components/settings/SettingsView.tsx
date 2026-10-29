@@ -19,6 +19,7 @@ import {
 import { getSupabaseConfig, testSupabaseConnection } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../ui/Button';
+import { ChangePasswordSection } from '../auth/ChangePasswordSection';
 
 interface SettingsViewProps {
   onOpenSetupModal: () => void;
@@ -177,6 +178,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenSetupModal }) 
           </div>
         </div>
       </div>
+
+      {/* Account Security & Password Change */}
+      <ChangePasswordSection />
     </div>
   );
 };

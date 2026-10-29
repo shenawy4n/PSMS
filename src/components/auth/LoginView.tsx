@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { isSupabaseConfigured } from '../../lib/supabase';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
+import { ForgotPasswordModal } from './ForgotPasswordModal';
 
 interface LoginViewProps {
   onSuccess: () => void;
@@ -17,6 +18,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenSetupModa
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showDemoOptions, setShowDemoOptions] = useState(false);
+  const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
 
   const isSupabase = isSupabaseConfigured();
 
@@ -102,21 +104,37 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenSetupModa
               required
             />
 
-            <Input
-              label="كلمة المرور"
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required={isSupabase}
-              helperText={isSupabase ? 'كلمة المرور المسجلة في Supabase Auth' : 'غير مطلوبة في وضع المعاينة السريعة'}
-            />
+            <div>
+              <Input
+                label="كلمة المرور"
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required={isSupabase}
+                helperText={isSupabase ? 'كلمة المرور المسجلة في Supabase Auth' : 'غير مطلوبة في وضع المعاينة السريعة'}
+              />
+              <div className="flex justify-end mt-1.5">
+                <button
+                  type="button"
+                  onClick={() => setIsForgotPasswordOpen(true)}
+                  className="text-xs text-blue-400 hover:text-blue-300 transition-colors underline cursor-pointer"
+                >
+                  نسيت كلمة المرور؟
+                </button>
+              </div>
+            </div>
 
             <Button type="submit" className="w-full" size="md" isLoading={loading}>
               <span>تسجيل الدخول للمنظومة</span>
               <ArrowLeft className="w-4 h-4 mr-1" />
             </Button>
           </form>
+
+          <ForgotPasswordModal
+            isOpen={isForgotPasswordOpen}
+            onClose={() => setIsForgotPasswordOpen(false)}
+          />
 
           {/* Collapsible Demo Mode for offline testing */}
           <div className="pt-4 border-t border-slate-800">

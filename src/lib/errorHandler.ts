@@ -133,6 +133,35 @@ export function formatArabicError(err: unknown): AppError {
       type: 'authorization',
     };
   }
+  if (rawMessage.includes('Password should be at least') || rawMessage.includes('password is too weak')) {
+    return {
+      message: 'كلمة المرور لا تحقق معايير الأمان المطلوبة (يجب أن تتكون من 8 رموز على الأقل وتحتوي على أحرف كبيرة وصغيرة وأرقام ورموز خاصة).',
+      type: 'validation',
+    };
+  }
+  if (rawMessage.includes('New password should be different from the old password')) {
+    return {
+      message: 'يجب أن تكون كلمة المرور الجديدة مختلفة عن كلمة المرور الحالية.',
+      type: 'validation',
+    };
+  }
+  if (
+    rawMessage.includes('Email link is invalid or has expired') ||
+    rawMessage.includes('Token has expired') ||
+    rawMessage.includes('invalid_token') ||
+    rawMessage.includes('otp_expired')
+  ) {
+    return {
+      message: 'رابط استعادة كلمة المرور غير صالح أو منتهي الصلاحية. يرجى طلب رابط جديد.',
+      type: 'authorization',
+    };
+  }
+  if (rawMessage.includes('Auth session missing') || rawMessage.includes('session_not_found')) {
+    return {
+      message: 'جلسة العمل غير متاحة. يرجى تسجيل الدخول أو إعادة طلب رابط الاستعادة.',
+      type: 'authorization',
+    };
+  }
   if (rawMessage.includes('Email not confirmed')) {
     return {
       message: 'حساب البريد الإلكتروني لم يتم تأكيده بعد، يرجى مراجعة بريدك.',
@@ -143,6 +172,12 @@ export function formatArabicError(err: unknown): AppError {
     return {
       message: 'البريد الإلكتروني مسجل مسبقاً بحساب مستخدم آخر.',
       type: 'duplicate',
+    };
+  }
+  if (rawMessage.includes('For security purposes, you can only request this once every') || rawMessage.includes('rate_limit')) {
+    return {
+      message: 'تم تجاوز الحد المسموح للطلبات المتتالية. يرجى الانتظار دقيقة واحدة قبل المحاولة مجدداً.',
+      type: 'validation',
     };
   }
   if (rawMessage.includes('JWT expired') || code === 'PGRST301') {

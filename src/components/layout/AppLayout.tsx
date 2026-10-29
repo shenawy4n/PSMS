@@ -35,6 +35,7 @@ interface AppLayoutProps {
   currentTab: string;
   onSelectTab: (tabId: string) => void;
   onOpenSetupModal: () => void;
+  onOpenProfileModal?: () => void;
   children: React.ReactNode;
 }
 
@@ -42,6 +43,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   currentTab,
   onSelectTab,
   onOpenSetupModal,
+  onOpenProfileModal,
   children,
 }) => {
   const { currentUser, role, isSupabaseMode, isDemoMode, switchUserRole, signOut, exitDemoMode } = useAuth();
@@ -161,16 +163,18 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           {/* Real Authenticated Session Display vs Demo Switcher */}
           {!isDemoMode && isSupabaseMode ? (
             <div className="flex items-center gap-2">
-              <div
-                className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold bg-blue-950/80 text-blue-300 border border-blue-800/80 rounded-lg shadow-sm"
-                title={`تم توثيق الحساب عبر Supabase: ${currentUser?.email}`}
+              <button
+                type="button"
+                onClick={onOpenProfileModal}
+                className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold bg-blue-950/80 hover:bg-blue-900/80 text-blue-300 border border-blue-800/80 rounded-lg shadow-sm cursor-pointer transition-colors"
+                title={`الملف الشخصي وإعدادات الحساب: ${currentUser?.email}`}
               >
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                 <span className="truncate max-w-[130px] sm:max-w-none">{currentUser?.full_name || getRoleArabicLabel(role)}</span>
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/80 text-blue-200 border border-blue-700/50">
                   {getRoleArabicLabel(role)}
                 </span>
-              </div>
+              </button>
 
               <button
                 onClick={signOut}
@@ -303,15 +307,20 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           {/* User Profile Footer Card */}
           {currentUser && (
             <div className="pt-4 border-t border-slate-800/80 mt-auto">
-              <div className="flex items-center gap-3 p-2 rounded-lg bg-slate-950/60 border border-slate-800/60">
-                <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center font-bold text-xs text-blue-400 border border-slate-700">
+              <button
+                type="button"
+                onClick={onOpenProfileModal}
+                className="w-full flex items-center gap-3 p-2 rounded-lg bg-slate-950/60 hover:bg-slate-800/80 border border-slate-800/60 hover:border-blue-500/40 transition-colors text-right cursor-pointer group"
+                title="فتح الملف الشخصي وتغيير كلمة المرور"
+              >
+                <div className="w-8 h-8 rounded-full bg-slate-800 group-hover:bg-blue-950 flex items-center justify-center font-bold text-xs text-blue-400 border border-slate-700 group-hover:border-blue-600 transition-colors">
                   {currentUser.full_name.slice(0, 2)}
                 </div>
-                <div className="flex-1 min-w-0 text-right">
-                  <p className="text-xs font-medium text-slate-200 truncate">{currentUser.full_name}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-slate-200 group-hover:text-white truncate">{currentUser.full_name}</p>
                   <p className="text-[11px] text-slate-400 truncate">{currentUser.job_title || currentUser.email}</p>
                 </div>
-              </div>
+              </button>
             </div>
           )}
         </aside>

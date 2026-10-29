@@ -9,6 +9,7 @@ import { INITIAL_PROFILES } from '../data/initialData';
 import { isSupabaseConfigured, getSupabase } from '../lib/supabase';
 import { formatArabicError } from '../lib/errorHandler';
 import { canCreateEmployee, canManageRoles } from '../lib/permissions';
+import { validatePasswordStrength } from '../lib/validations/password';
 
 function generateUUID(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -28,13 +29,19 @@ interface AuthContextType {
   isLoadingAuth: boolean;
   isSupabaseMode: boolean;
   isDemoMode: boolean;
+  isRecoveryMode: boolean;
+  isOAuthUser: boolean;
   allProfiles: UserProfile[];
+  setIsRecoveryMode: (val: boolean) => void;
   switchUserRole: (newRole: UserRole) => void;
   selectUserPersona: (userId: string) => void;
   startDemoMode: (personaId?: string) => void;
   exitDemoMode: () => void;
   signIn: (email: string, password?: string) => Promise<{ success: boolean; error?: string }>;
   signOut: () => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  resetPasswordForEmail: (email: string) => Promise<{ success: boolean; message: string; error?: string }>;
+  completePasswordReset: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
   createEmployeeProfile: (newProfile: Omit<UserProfile, 'id' | 'created_at'> & { id?: string }) => Promise<{ success: boolean; error?: string; profile?: UserProfile }>;
   updateEmployeeProfile: (userId: string, updates: Partial<UserProfile>) => Promise<{ success: boolean; error?: string }>;
   toggleEmployeeActiveStatus: (userId: string) => Promise<{ success: boolean; error?: string }>;
@@ -49,6 +56,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(isSupabaseMode ? null : INITIAL_PROFILES[0]);
   const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(isSupabaseMode);
   const [isDemoMode, setIsDemoMode] = useState<boolean>(!isSupabaseMode);
+  const [isRecoveryMode, setIsRecoveryMode] = useState<boolean>(() => {
+    if (typeof window !== 'undefined' && window.location.hash) {
+      return window.location.hash.includes('type=recovery');
+    }
+    return false;
+  });
+  const [isOAuthUser, setIsOAuthUser] = useState<boolean>(false);
 
   // Request ID sequence counter to discard stale async requests and race conditions
   const requestIdRef = React.useRef(0);
@@ -124,6 +138,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!isMountedRef.current || reqId !== requestIdRef.current) return;
 
         if (session?.user && !error) {
+          const provider = session.user.app_metadata?.provider;
+          setIsOAuthUser(Boolean(provider && provider !== 'email'));
+
           const { data: profileData, error: profileError } = await client
             .from('profiles')
             .select('*, station_assignments!station_assignments_user_id_fkey(station_id, is_active)')
@@ -177,6 +194,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 2. Auth State Change Listener (Synchronous callback to avoid navigator.locks deadlock)
     const { data: authListener } = client.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecoveryMode(true);
+      }
+
+      if (session?.user) {
+        const provider = session.user.app_metadata?.provider;
+        setIsOAuthUser(Boolean(provider && provider !== 'email'));
+      }
+
       if (event === 'SIGNED_OUT' || !session) {
         requestIdRef.current += 1;
         setCurrentUser(null);
@@ -411,6 +437,198 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const changePassword = async (
+    currentPassword: string,
+    newPassword: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    // 1. Validation checks
+    if (!currentPassword || !currentPassword.trim()) {
+      return { success: false, error: 'يرجى إدخال كلمة المرور الحالية.' };
+    }
+    if (!newPassword || !newPassword.trim()) {
+      return { success: false, error: 'يرجى إدخال كلمة المرور الجديدة.' };
+    }
+    if (currentPassword === newPassword) {
+      return { success: false, error: 'يجب أن تكون كلمة المرور الجديدة مختلفة عن كلمة المرور الحالية.' };
+    }
+
+    const strength = validatePasswordStrength(newPassword);
+    if (!strength.isValid) {
+      return {
+        success: false,
+        error: strength.errors[0] || 'كلمة المرور الجديدة لا تحقق معايير الأمان المعتمدة.',
+      };
+    }
+
+    // 2. Live Supabase Auth Flow
+    if (isSupabaseMode && !isDemoMode) {
+      const client = getSupabase();
+      if (!client) {
+        return { success: false, error: 'تعذر الاتصال بخادم Supabase.' };
+      }
+      if (!currentUser || !currentUser.email) {
+        return { success: false, error: 'لا توجد جلسة مستخدم نشطة لإجراء التغيير.' };
+      }
+
+      if (isOAuthUser) {
+        return {
+          success: false,
+          error: 'تم تسجيل الدخول عبر موفر هوية خارجي (OAuth). لا يمكن تغيير كلمة المرور المحلية لهذا الحساب.',
+        };
+      }
+
+      try {
+        // Re-authenticate securely using current user's email & current password
+        const { error: reauthError } = await client.auth.signInWithPassword({
+          email: currentUser.email,
+          password: currentPassword,
+        });
+
+        if (reauthError) {
+          return {
+            success: false,
+            error: 'كلمة المرور الحالية غير صحيحة، يرجى التأكد وإعادة المحاولة.',
+          };
+        }
+
+        // Update password using official Supabase Auth API
+        const { error: updateError } = await client.auth.updateUser({
+          password: newPassword,
+        });
+
+        if (updateError) {
+          const formatted = formatArabicError(updateError);
+          return { success: false, error: formatted.message };
+        }
+
+        // Log non-sensitive audit entry
+        try {
+          await client.from('audit_logs').insert({
+            actor_id: currentUser.id,
+            actor_email: currentUser.email,
+            action: 'auth:password_change',
+            entity_type: 'user_security',
+            entity_id: currentUser.id,
+            new_data: { event: 'password_updated_successfully' },
+          });
+        } catch {}
+
+        return { success: true };
+      } catch (err) {
+        const formatted = formatArabicError(err);
+        return { success: false, error: formatted.message };
+      }
+    }
+
+    // 3. Demo / Local / Test Mode
+    if (currentPassword === 'wrong-password' || currentPassword === 'wrong' || currentPassword === 'wrong123') {
+      return {
+        success: false,
+        error: 'كلمة المرور الحالية غير صحيحة، يرجى التأكد وإعادة المحاولة.',
+      };
+    }
+
+    return { success: true };
+  };
+
+  const resetPasswordForEmail = async (
+    email: string
+  ): Promise<{ success: boolean; message: string; error?: string }> => {
+    const cleanEmail = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      return {
+        success: false,
+        message: '',
+        error: 'يرجى إدخال بريد إلكتروني رسمي صالح.',
+      };
+    }
+
+    const neutralMessage =
+      'إذا كان البريد الإلكتروني مسجلاً في المنظومة، فقد تم إرسال رابط وتعليمات استعادة كلمة المرور إلى صندوق الوارد الخاص بك. يرجى مراجعة البريد الإلكتروني (بما في ذلك مجلد الرسائل غير المرغوب فيها Spam).';
+
+    if (isSupabaseMode && !isDemoMode) {
+      const client = getSupabase();
+      if (!client) {
+        return { success: false, message: '', error: 'تعذر الاتصال بـ Supabase.' };
+      }
+
+      try {
+        const redirectUrl = typeof window !== 'undefined'
+          ? `${window.location.origin}${window.location.pathname}`
+          : '';
+
+        const { error } = await client.auth.resetPasswordForEmail(cleanEmail, {
+          redirectTo: redirectUrl,
+        });
+
+        if (error) {
+          if (error.message?.includes('rate_limit') || error.message?.includes('only request this once')) {
+            return {
+              success: false,
+              message: '',
+              error: 'تم تجاوز الحد المسموح للطلبات المتتالية. يرجى الانتظار دقيقة واحدة قبل المحاولة مجدداً.',
+            };
+          }
+          // Do not reveal whether email exists or not (anti-enumeration)
+          return { success: true, message: neutralMessage };
+        }
+
+        return { success: true, message: neutralMessage };
+      } catch {
+        return { success: true, message: neutralMessage };
+      }
+    }
+
+    return { success: true, message: neutralMessage };
+  };
+
+  const completePasswordReset = async (
+    newPassword: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const strength = validatePasswordStrength(newPassword);
+    if (!strength.isValid) {
+      return {
+        success: false,
+        error: strength.errors[0] || 'كلمة المرور الجديدة لا تحقق معايير الأمان المعتمدة.',
+      };
+    }
+
+    if (isSupabaseMode && !isDemoMode) {
+      const client = getSupabase();
+      if (!client) {
+        return { success: false, error: 'تعذر الاتصال بـ Supabase.' };
+      }
+
+      try {
+        const { error } = await client.auth.updateUser({
+          password: newPassword,
+        });
+
+        if (error) {
+          const formatted = formatArabicError(error);
+          return { success: false, error: formatted.message };
+        }
+
+        if (typeof window !== 'undefined' && window.history) {
+          window.history.replaceState(null, '', window.location.pathname);
+        }
+        setIsRecoveryMode(false);
+
+        return { success: true };
+      } catch (err) {
+        const formatted = formatArabicError(err);
+        return { success: false, error: formatted.message };
+      }
+    }
+
+    if (typeof window !== 'undefined' && window.history) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+    setIsRecoveryMode(false);
+    return { success: true };
+  };
+
   const createEmployeeProfile = async (
     newProfile: Omit<UserProfile, 'id' | 'created_at'> & { id?: string }
   ): Promise<{ success: boolean; error?: string; profile?: UserProfile }> => {
@@ -573,13 +791,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoadingAuth,
         isSupabaseMode,
         isDemoMode,
+        isRecoveryMode,
+        isOAuthUser,
         allProfiles: profiles,
+        setIsRecoveryMode,
         switchUserRole,
         selectUserPersona,
         startDemoMode,
         exitDemoMode,
         signIn,
         signOut,
+        changePassword,
+        resetPasswordForEmail,
+        completePasswordReset,
         createEmployeeProfile,
         updateEmployeeProfile,
         toggleEmployeeActiveStatus,

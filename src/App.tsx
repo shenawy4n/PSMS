@@ -26,6 +26,8 @@ import { TasksView } from './components/tasks/TasksView';
 import { ReportsView } from './components/reports/ReportsView';
 import { NotificationsView } from './components/notifications/NotificationsView';
 import { LoginView } from './components/auth/LoginView';
+import { UserProfileModal } from './components/auth/UserProfileModal';
+import { ResetPasswordModal } from './components/auth/ResetPasswordModal';
 import { Station } from './types/database';
 
 function MainApp() {
@@ -49,6 +51,7 @@ function MainApp() {
   const [targetStationForAssign, setTargetStationForAssign] = useState<string | undefined>();
 
   const [isSetupModalOpen, setIsSetupModalOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   if (isLoadingAuth) {
     return (
@@ -70,6 +73,7 @@ function MainApp() {
           isOpen={isSetupModalOpen}
           onClose={() => setIsSetupModalOpen(false)}
         />
+        <ResetPasswordModal />
       </>
     );
   }
@@ -114,6 +118,7 @@ function MainApp() {
         }
       }}
       onOpenSetupModal={() => setIsSetupModalOpen(true)}
+      onOpenProfileModal={() => setIsProfileModalOpen(true)}
     >
       {/* Tab Routing */}
       {currentTab === 'dashboard' && (
@@ -221,6 +226,13 @@ function MainApp() {
         isOpen={isSetupModalOpen}
         onClose={() => setIsSetupModalOpen(false)}
       />
+
+      <UserProfileModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+      />
+
+      <ResetPasswordModal />
 
       {/* Global Toast Notification */}
       {toast && (
