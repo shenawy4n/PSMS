@@ -12,15 +12,82 @@ interface LoginViewProps {
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenSetupModal }) => {
-  const { signIn, startDemoMode, allProfiles } = useAuth();
+  const { signIn, startDemoMode, allProfiles, connectionStatus, connectionMessage, checkConnection } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [retryingConn, setRetryingConn] = useState(false);
   const [showDemoOptions, setShowDemoOptions] = useState(false);
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
 
   const isSupabase = isSupabaseConfigured();
+
+  const handleRetryConnection = async () => {
+    setRetryingConn(true);
+    try {
+      await checkConnection();
+    } finally {
+      setRetryingConn(false);
+    }
+  };
+
+  const getStatusBannerConfig = () => {
+    switch (connectionStatus) {
+      case 'connected':
+        return {
+          wrapper: 'bg-emerald-950/40 border-emerald-800/80 text-emerald-300',
+          dot: 'bg-emerald-400',
+          title: 'اتصال Supabase Auth وقاعدة البيانات نشط وموثوق',
+          showRetry: false,
+        };
+      case 'permission_denied':
+        return {
+          wrapper: 'bg-cyan-950/40 border-cyan-800/80 text-cyan-300',
+          dot: 'bg-cyan-400',
+          title: 'خادم Supabase متصل وسياسات RLS مفعّلة (سجّل دخولك للوصول للجداول)',
+          showRetry: false,
+        };
+      case 'checking':
+        return {
+          wrapper: 'bg-sky-950/40 border-sky-800/80 text-sky-300',
+          dot: 'bg-sky-400 animate-pulse',
+          title: 'جاري فحص الاتصال بخادم Supabase...',
+          showRetry: false,
+        };
+      case 'network_error':
+        return {
+          wrapper: 'bg-rose-950/40 border-rose-800/80 text-rose-300',
+          dot: 'bg-rose-400',
+          title: 'تعذر الوصول لخادم Supabase (تحقق من اتصال الإنترنت)',
+          showRetry: true,
+        };
+      case 'schema_mismatch':
+        return {
+          wrapper: 'bg-amber-950/40 border-amber-800/80 text-amber-300',
+          dot: 'bg-amber-400',
+          title: 'تم الاتصال بالخادم ولكن المخطط بحاجة للتهيئة (Schema Check)',
+          showRetry: true,
+        };
+      case 'error':
+        return {
+          wrapper: 'bg-rose-950/40 border-rose-800/80 text-rose-300',
+          dot: 'bg-rose-400',
+          title: connectionMessage || 'خطأ في الاتصال بخادم Supabase',
+          showRetry: true,
+        };
+      case 'unconfigured':
+      default:
+        return {
+          wrapper: 'bg-amber-950/40 border-amber-800/80 text-amber-300',
+          dot: 'bg-amber-400',
+          title: isSupabase ? 'قيد التحقق من الاتصال...' : 'وضع المعاينة والتحقق الأولي (بيانات محلية)',
+          showRetry: isSupabase,
+        };
+    }
+  };
+
+  const banner = getStatusBannerConfig();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,23 +122,30 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenSetupModa
         </div>
 
         {/* Supabase Status Banner */}
-        <div
-          className={`p-3 rounded-lg border text-xs flex items-center justify-between ${
-            isSupabase
-              ? 'bg-emerald-950/40 border-emerald-800/80 text-emerald-300'
-              : 'bg-amber-950/40 border-amber-800/80 text-amber-300'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${isSupabase ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-            <span>{isSupabase ? 'مصادقة Supabase Auth مشغّلة' : 'وضع المعاينة والتحقق الأولي'}</span>
+        <div className={`p-3 rounded-lg border text-xs flex items-center justify-between gap-2 ${banner.wrapper}`}>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${banner.dot}`} />
+            <span className="truncate">{banner.title}</span>
           </div>
-          <button
-            onClick={onOpenSetupModal}
-            className="underline hover:text-white cursor-pointer font-medium"
-          >
-            إعدادات الربط
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {banner.showRetry && (
+              <button
+                type="button"
+                onClick={handleRetryConnection}
+                disabled={retryingConn}
+                className="underline hover:text-white cursor-pointer font-medium disabled:opacity-50"
+              >
+                {retryingConn ? 'جاري الفحص...' : 'إعادة المحاولة'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onOpenSetupModal}
+              className="underline hover:text-white cursor-pointer font-medium"
+            >
+              إعدادات الربط
+            </button>
+          </div>
         </div>
 
         {/* Login Form Card */}

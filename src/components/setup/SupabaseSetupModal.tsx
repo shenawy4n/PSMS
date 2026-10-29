@@ -26,6 +26,9 @@ import {
   clearCustomCredentials,
   getActiveSupabaseUrl,
   getActiveSupabaseKey,
+  validateSupabaseUrl,
+  validateSupabaseKey,
+  ConnectionDiagnosticResult,
 } from '../../lib/supabase';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
@@ -38,7 +41,7 @@ interface SupabaseSetupModalProps {
 export const SupabaseSetupModal: React.FC<SupabaseSetupModalProps> = ({ isOpen, onClose }) => {
   const config = getSupabaseConfig();
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string; latencyMs?: number } | null>(null);
+  const [testResult, setTestResult] = useState<ConnectionDiagnosticResult | null>(null);
 
   // Form inputs for direct credentials setup
   const [inputUrl, setInputUrl] = useState(
@@ -63,14 +66,50 @@ VITE_SUPABASE_PUBLISHABLE_KEY="your-anon-or-publishable-key"`;
   };
 
   const handleSaveCredentials = () => {
-    if (!inputUrl.trim() || !inputKey.trim()) {
+    const trimmedUrl = inputUrl.trim();
+    const trimmedKey = inputKey.trim();
+
+    if (!trimmedUrl || !trimmedKey) {
       setTestResult({
         success: false,
+        status: 'unconfigured',
         message: 'يرجى إدخال كل من رابط المشروع ومفتاح الوصول (Anon Key).',
+        isAuthReachable: false,
+        canQueryDatabase: false,
       });
       return;
     }
-    setCustomCredentials(inputUrl.trim(), inputKey.trim());
+
+    const urlValidation = validateSupabaseUrl(trimmedUrl);
+    if (!urlValidation.isValid) {
+      setTestResult({
+        success: false,
+        status: 'error',
+        message: urlValidation.error || 'رابط Supabase غير صالح.',
+        isAuthReachable: false,
+        canQueryDatabase: false,
+      });
+      return;
+    }
+
+    const keyValidation = validateSupabaseKey(trimmedKey);
+    if (!keyValidation.isValid) {
+      setTestResult({
+        success: false,
+        status: 'error',
+        message: keyValidation.error || 'مفتاح الوصول غير صالح.',
+        isAuthReachable: false,
+        canQueryDatabase: false,
+      });
+      return;
+    }
+
+    // Clear stale cached station to prevent cross-project pollution
+    try {
+      localStorage.removeItem('psms_selected_station_id');
+    } catch {}
+
+    setCustomCredentials(trimmedUrl, trimmedKey);
     setIsSavedNotice(true);
     setTimeout(() => setIsSavedNotice(false), 3000);
     runTest();
@@ -78,6 +117,9 @@ VITE_SUPABASE_PUBLISHABLE_KEY="your-anon-or-publishable-key"`;
 
   const handleClearCredentials = () => {
     clearCustomCredentials();
+    try {
+      localStorage.removeItem('psms_selected_station_id');
+    } catch {}
     setInputUrl('https://gygksvqqqtjqgcnwfjha.supabase.co');
     setInputKey('');
     setTestResult(null);
@@ -158,16 +200,31 @@ VITE_SUPABASE_PUBLISHABLE_KEY="your-anon-or-publishable-key"`;
         {/* Test Result Message */}
         {testResult && (
           <div
-            className={`p-3 rounded-lg border font-mono text-xs ${
+            className={`p-3.5 rounded-lg border text-xs space-y-2 ${
               testResult.success
                 ? 'bg-emerald-950/50 border-emerald-800 text-emerald-300'
                 : 'bg-rose-950/50 border-rose-800 text-rose-300'
             }`}
           >
-            <p>{testResult.message}</p>
-            {testResult.latencyMs !== undefined && (
-              <p className="text-[11px] text-slate-400 mt-1">زمن الاستجابة: {testResult.latencyMs}ms</p>
-            )}
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-semibold">{testResult.message}</p>
+              {testResult.latencyMs !== undefined && (
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 shrink-0">
+                  {testResult.latencyMs}ms
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800/80 text-[11px] font-mono">
+              <span className={`px-2 py-0.5 rounded ${testResult.isAuthReachable ? 'bg-emerald-900/60 text-emerald-200' : 'bg-rose-900/60 text-rose-200'}`}>
+                خدمة Auth: {testResult.isAuthReachable ? 'متاحة' : 'غير متاحة'}
+              </span>
+              <span className={`px-2 py-0.5 rounded ${testResult.canQueryDatabase ? 'bg-emerald-900/60 text-emerald-200' : testResult.status === 'permission_denied' ? 'bg-cyan-900/60 text-cyan-200' : 'bg-rose-900/60 text-rose-200'}`}>
+                قاعدة البيانات: {testResult.canQueryDatabase ? 'استعلام ناجح' : testResult.status === 'permission_denied' ? 'محمية بـ RLS (تتطلب تسجيل الدخول)' : 'تعذر الاستعلام'}
+              </span>
+              <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                الحالة: {testResult.status}
+              </span>
+            </div>
           </div>
         )}
 

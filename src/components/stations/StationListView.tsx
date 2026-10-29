@@ -308,8 +308,72 @@ export const StationListView: React.FC<StationListViewProps> = ({
         </div>
       </div>
 
-      {/* High-Density Data Grid Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+      {/* Mobile Station Cards (< 768px) */}
+      <div className="block md:hidden space-y-3">
+        {filteredStations.length === 0 ? (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center text-slate-500">
+            <p className="text-sm">لا توجد محطات مطابقة لمعايير البحث الحالية</p>
+          </div>
+        ) : (
+          paginatedStations.map((station) => {
+            const statusInfo = getStationStatusInfo(station.status);
+            const canEdit = canEditStation(role, currentUser?.organization_id, station.organization_id);
+
+            return (
+              <div
+                key={station.id}
+                onClick={() => onSelectStation(station)}
+                className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-xl p-4 space-y-3 transition-colors cursor-pointer"
+              >
+                <div className="flex items-start justify-between gap-2 border-b border-slate-800/80 pb-2.5">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-bold text-blue-400">{station.code}</span>
+                      <span className={`inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium border ${statusInfo.bg} ${statusInfo.text} ${statusInfo.border}`}>
+                        {statusInfo.label}
+                      </span>
+                    </div>
+                    <h3 className="font-semibold text-white text-sm mt-1">{station.name}</h3>
+                  </div>
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    {canEdit && (
+                      <button
+                        onClick={() => onOpenEditModal(station)}
+                        className="p-1.5 text-slate-400 hover:text-blue-400 rounded-lg hover:bg-slate-800"
+                        title="تعديل المحطة"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                  <div className="p-2 rounded bg-slate-950/60 border border-slate-800/60">
+                    <span className="text-[10px] text-slate-400 block font-sans">الجهد التشغيلي:</span>
+                    <span className="font-bold text-emerald-400 tabular-nums">{station.voltage_level_kv} kV</span>
+                  </div>
+                  <div className="p-2 rounded bg-slate-950/60 border border-slate-800/60">
+                    <span className="text-[10px] text-slate-400 block font-sans">القدرة المركبة:</span>
+                    <span className="font-bold text-white tabular-nums">{station.installed_capacity_mw} MW</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800/60">
+                  <span className="flex items-center gap-1">
+                    <MapPin className="w-3 h-3 text-slate-500" />
+                    <span>{station.governorate} · {station.region}</span>
+                  </span>
+                  <span>{getStationTypeArabic(station.type)}</span>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* High-Density Data Grid Table (Desktop >= 768px) */}
+      <div className="hidden md:block bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-right text-xs">
             <thead className="bg-slate-950/80 text-slate-400 border-b border-slate-800 font-medium">

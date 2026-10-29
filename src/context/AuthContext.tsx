@@ -6,10 +6,25 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { UserProfile, UserRole } from '../types/database';
 import { INITIAL_PROFILES } from '../data/initialData';
-import { isSupabaseConfigured, getSupabase } from '../lib/supabase';
+import {
+  isSupabaseConfigured,
+  getSupabase,
+  testSupabaseConnection,
+  SupabaseConnectionStatus,
+  ConnectionDiagnosticResult,
+} from '../lib/supabase';
 import { formatArabicError } from '../lib/errorHandler';
 import { canCreateEmployee, canManageRoles } from '../lib/permissions';
 import { validatePasswordStrength } from '../lib/validations/password';
+
+export type AuthSessionStatus =
+  | 'validating'       // جارٍ التحقق من الجلسة
+  | 'authenticated'    // تم تسجيل الدخول بجلسة موثقة
+  | 'unauthenticated'  // لا توجد جلسة نشطة
+  | 'expired'          // انتهت صلاحية الجلسة
+  | 'no_profile'       // الحساب يفتقر لملف وظيفي في public.profiles
+  | 'inactive'         // الحساب مجمد أو معطل
+  | 'demo_mode';       // وضع تجريبي معزول
 
 function generateUUID(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -31,6 +46,10 @@ interface AuthContextType {
   isDemoMode: boolean;
   isRecoveryMode: boolean;
   isOAuthUser: boolean;
+  connectionStatus: SupabaseConnectionStatus;
+  connectionMessage: string;
+  sessionStatus: AuthSessionStatus;
+  checkConnection: () => Promise<ConnectionDiagnosticResult>;
   allProfiles: UserProfile[];
   setIsRecoveryMode: (val: boolean) => void;
   switchUserRole: (newRole: UserRole) => void;
@@ -56,6 +75,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(isSupabaseMode ? null : INITIAL_PROFILES[0]);
   const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(isSupabaseMode);
   const [isDemoMode, setIsDemoMode] = useState<boolean>(!isSupabaseMode);
+
+  // Granular connection & session status
+  const [connectionStatus, setConnectionStatus] = useState<SupabaseConnectionStatus>(
+    isSupabaseMode ? 'unverified' : 'unconfigured'
+  );
+  const [connectionMessage, setConnectionMessage] = useState<string>(
+    isSupabaseMode ? 'لم يتم التحقق من الاتصال بعد' : 'إعدادات الاتصال بـ Supabase غير مكتملة'
+  );
+  const [sessionStatus, setSessionStatus] = useState<AuthSessionStatus>(
+    isSupabaseMode ? 'validating' : 'demo_mode'
+  );
+
   const [isRecoveryMode, setIsRecoveryMode] = useState<boolean>(() => {
     if (typeof window !== 'undefined' && window.location.hash) {
       return window.location.hash.includes('type=recovery');
@@ -63,6 +94,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return false;
   });
   const [isOAuthUser, setIsOAuthUser] = useState<boolean>(false);
+
+  // Diagnostic connection verification
+  const checkConnection = useCallback(async (): Promise<ConnectionDiagnosticResult> => {
+    setConnectionStatus('checking');
+    setConnectionMessage('جاري فحص الاتصال بخادم Supabase...');
+    const diag = await testSupabaseConnection();
+    setConnectionStatus(diag.status);
+    setConnectionMessage(diag.message);
+    return diag;
+  }, []);
 
   // Request ID sequence counter to discard stale async requests and race conditions
   const requestIdRef = React.useRef(0);
@@ -130,14 +171,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     let authSubscription: { unsubscribe: () => void } | null = null;
 
-    // 1. Initial session check
+    // 1. Initial connection check and session verification
     const initSession = async () => {
       const reqId = ++requestIdRef.current;
+      setSessionStatus('validating');
+
+      // Run connection diagnostics in background/parallel
+      checkConnection().catch(() => {});
+
       try {
         const { data: { session }, error } = await client.auth.getSession();
         if (!isMountedRef.current || reqId !== requestIdRef.current) return;
 
-        if (session?.user && !error) {
+        if (error) {
+          console.warn('Supabase getSession error:', error);
+          setSessionStatus('unauthenticated');
+          setCurrentUser(null);
+          return;
+        }
+
+        if (session?.user) {
           const provider = session.user.app_metadata?.provider;
           setIsOAuthUser(Boolean(provider && provider !== 'email'));
 
@@ -153,6 +206,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Strictly check account active status
             if (!profileData.is_active) {
               console.warn('Account is deactivated. Signing out.');
+              setSessionStatus('inactive');
               setCurrentUser(null);
               setIsDemoMode(false);
               client.auth.signOut().catch(() => {});
@@ -169,19 +223,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               assigned_station_ids: assignedIds,
             });
             setIsDemoMode(false);
+            setSessionStatus('authenticated');
           } else {
             console.warn('Authenticated user has no matching profile in public.profiles. Signing out.');
+            setSessionStatus('no_profile');
             setCurrentUser(null);
             setIsDemoMode(false);
             client.auth.signOut().catch(() => {});
           }
         } else {
           setCurrentUser(null);
+          setSessionStatus('unauthenticated');
         }
       } catch (err) {
         console.error('Auth session init error:', err);
         if (isMountedRef.current && reqId === requestIdRef.current) {
           setCurrentUser(null);
+          setSessionStatus('unauthenticated');
         }
       } finally {
         if (isMountedRef.current && reqId === requestIdRef.current) {
@@ -207,6 +265,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         requestIdRef.current += 1;
         setCurrentUser(null);
         setIsDemoMode(false);
+        setSessionStatus('unauthenticated');
         setIsLoadingAuth(false);
         return;
       }
@@ -239,6 +298,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (!profileData.is_active) {
                 setCurrentUser(null);
                 setIsDemoMode(false);
+                setSessionStatus('inactive');
                 setIsLoadingAuth(false);
                 client.auth.signOut().catch(() => {});
                 return;
@@ -253,10 +313,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 assigned_station_ids: assignedIds,
               });
               setIsDemoMode(false);
+              setSessionStatus('authenticated');
               setIsLoadingAuth(false);
             } else {
               setCurrentUser(null);
               setIsDemoMode(false);
+              setSessionStatus('no_profile');
               setIsLoadingAuth(false);
               client.auth.signOut().catch(() => {});
             }
@@ -264,6 +326,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             console.error('Error in onAuthStateChange profile load:', err);
             if (isMountedRef.current && reqId === requestIdRef.current) {
               setCurrentUser(null);
+              setSessionStatus('unauthenticated');
               setIsLoadingAuth(false);
             }
           }
@@ -282,7 +345,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       authSubscription?.unsubscribe();
     };
-  }, [isSupabaseMode, refreshProfiles]);
+  }, [isSupabaseMode, refreshProfiles, checkConnection]);
 
   // Demo Mode management
   const startDemoMode = (personaId?: string) => {
@@ -291,11 +354,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       : INITIAL_PROFILES[0];
     setCurrentUser(targetPersona);
     setIsDemoMode(true);
+    setSessionStatus('demo_mode');
   };
 
   const exitDemoMode = () => {
     setCurrentUser(null);
     setIsDemoMode(false);
+    setSessionStatus('unauthenticated');
   };
 
   // In Local/Demo Mode only: allow switching persona for verification.
@@ -328,12 +393,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (isSupabaseMode && !isDemoMode) {
       const client = getSupabase();
       if (!client) {
+        setSessionStatus('unauthenticated');
         return { success: false, error: 'تعذر الاتصال بـ Supabase' };
       }
       if (!password) {
         return { success: false, error: 'يرجى إدخال كلمة المرور' };
       }
 
+      setSessionStatus('validating');
       const reqId = ++requestIdRef.current;
       if (authTimeoutRef.current) {
         clearTimeout(authTimeoutRef.current);
@@ -343,10 +410,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const { data, error } = await client.auth.signInWithPassword({ email, password });
         if (!isMountedRef.current || reqId !== requestIdRef.current) {
+          setSessionStatus('unauthenticated');
           return { success: false, error: 'تم إلغاء عملية تسجيل الدخول' };
         }
 
         if (error) {
+          setSessionStatus('unauthenticated');
           const formatted = formatArabicError(error);
           return { success: false, error: formatted.message };
         }
@@ -360,6 +429,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             .maybeSingle();
 
           if (!isMountedRef.current || reqId !== requestIdRef.current) {
+            setSessionStatus('unauthenticated');
             return { success: false, error: 'تم إلغاء عملية تسجيل الدخول' };
           }
 
@@ -367,6 +437,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Profile does not exist: sign out safely to prevent untrusted access
             client.auth.signOut().catch(() => {});
             setCurrentUser(null);
+            setSessionStatus('no_profile');
             return {
               success: false,
               error: 'تم توثيق الحساب بنجاح، ولكن لا يوجد ملف وظيفي (Profile) مرتبط بهذا المستخدم في قاعدة البيانات (public.profiles). يرجى مراجعة إدارة المنظومة لربط حسابك.'
@@ -377,6 +448,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Account is deactivated: sign out safely
             client.auth.signOut().catch(() => {});
             setCurrentUser(null);
+            setSessionStatus('inactive');
             return {
               success: false,
               error: 'تم تجميد أو تعطيل هذا الحساب. يرجى التواصل مع مسؤول المنظومة.'
@@ -393,11 +465,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             assigned_station_ids: assignedIds,
           });
           setIsDemoMode(false);
+          setSessionStatus('authenticated');
 
           await refreshProfiles();
           return { success: true };
         }
       } catch (err) {
+        setSessionStatus('unauthenticated');
         const formatted = formatArabicError(err);
         return { success: false, error: formatted.message };
       }
@@ -408,8 +482,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (found) {
       setCurrentUser(found);
       setIsDemoMode(true);
+      setSessionStatus('demo_mode');
       return { success: true };
     }
+    setSessionStatus('unauthenticated');
     return { success: false, error: 'البريد الإلكتروني غير مسجل في قاعدة البيانات' };
   };
 
@@ -422,6 +498,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     setCurrentUser(null);
     setIsDemoMode(false);
+    setSessionStatus('unauthenticated');
     setIsLoadingAuth(false);
 
     // 2. Perform Supabase remote sign out safely without throwing unhandled rejection on network or token errors
@@ -793,6 +870,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isDemoMode,
         isRecoveryMode,
         isOAuthUser,
+        connectionStatus,
+        connectionMessage,
+        sessionStatus,
+        checkConnection,
         allProfiles: profiles,
         setIsRecoveryMode,
         switchUserRole,
