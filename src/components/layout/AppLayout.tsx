@@ -35,7 +35,7 @@ import { getRoleArabicLabel } from '../../lib/permissions';
 interface AppLayoutProps {
   currentTab: string;
   onSelectTab: (tabId: string) => void;
-  onOpenSetupModal: () => void;
+  onOpenSetupModal?: () => void;
   onOpenProfileModal?: () => void;
   children: React.ReactNode;
 }
@@ -238,10 +238,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
         {/* Zone 3: 1 Primary action & status indicators */}
         <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-          {/* Supabase Integration Badge / Setup Trigger */}
-          <button
-            onClick={onOpenSetupModal}
-            className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${connBadge.style}`}
+          {/* Supabase Integration Status Badge */}
+          <div
+            className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 text-xs font-medium rounded-lg border select-none whitespace-nowrap shrink-0 ${connBadge.style}`}
             title={`حالة الاتصال: ${connectionMessage}`}
           >
             <span className={`w-2 h-2 rounded-full shrink-0 ${connBadge.dot}`} />
@@ -249,7 +248,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             <span className="hidden sm:inline">
               {connBadge.label}
             </span>
-          </button>
+          </div>
 
           {/* Real Authenticated Session Display vs Demo Switcher */}
           {!isDemoMode && isSupabaseMode ? (
@@ -521,17 +520,19 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
                 )}
 
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMobileMenuOpen(false);
-                      onOpenSetupModal();
-                    }}
-                    className="flex-1 flex items-center justify-center gap-1.5 p-2 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg cursor-pointer transition-colors"
-                  >
-                    <Database className="w-3.5 h-3.5" />
-                    <span>إعدادات الربط</span>
-                  </button>
+                  {role === 'super_admin' && onOpenSetupModal && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        onOpenSetupModal();
+                      }}
+                      className="flex-1 flex items-center justify-center gap-1.5 p-2 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg cursor-pointer transition-colors"
+                    >
+                      <Database className="w-3.5 h-3.5" />
+                      <span>إعدادات الربط</span>
+                    </button>
+                  )}
                   {currentUser && (
                     <button
                       type="button"

@@ -61,8 +61,10 @@ export const ReadingsView: React.FC<ReadingsViewProps> = ({ onOpenAddModal }) =>
           <div className="w-12 h-12 rounded-full bg-slate-800/80 flex items-center justify-center mx-auto text-slate-400">
             <Activity className="w-6 h-6" />
           </div>
-          <p className="text-sm font-semibold text-white">لا توجد قراءات فنية مسجلة</p>
-          <p className="text-xs text-slate-400">لم يتم تسجيل أي قراءات للمحطة المحددة. يمكنك إضافة قراءة جديدة بالضغط على الزر أعلاه.</p>
+          <p className="text-sm font-semibold text-white">
+            {stationReadings.length === 0 ? 'مفيش قراءات تشغيلية مسجلة للفترة دي.' : 'مفيش قراءات مطابقة للمحطة المختارة.'}
+          </p>
+          <p className="text-xs text-slate-400">تقدر تسجل قراءة جديدة من خلال الضغط على زر "تسجيل قراءة فنية" في الأعلى.</p>
         </div>
       ) : (
         <>
@@ -74,7 +76,7 @@ export const ReadingsView: React.FC<ReadingsViewProps> = ({ onOpenAddModal }) =>
                   <div>
                     <h3 className="font-semibold text-white text-sm">{r.station_name || r.station_code}</h3>
                     <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                      {new Date(r.reading_timestamp).toLocaleString('ar-SA')}
+                      {new Date(r.reading_timestamp).toLocaleString('ar-EG')}
                     </p>
                   </div>
                   <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-blue-950 text-blue-300 border border-blue-800">
@@ -131,7 +133,7 @@ export const ReadingsView: React.FC<ReadingsViewProps> = ({ onOpenAddModal }) =>
                   {filteredReadings.map((r) => (
                     <tr key={r.id} className="hover:bg-slate-800/40 transition-colors">
                       <td className="py-3.5 px-4 text-slate-300 whitespace-nowrap">
-                        {new Date(r.reading_timestamp).toLocaleString('ar-SA')}
+                        {new Date(r.reading_timestamp).toLocaleString('ar-EG')}
                       </td>
                       <td className="py-3.5 px-4 font-sans font-medium text-white whitespace-nowrap">
                         {r.station_name || r.station_code}

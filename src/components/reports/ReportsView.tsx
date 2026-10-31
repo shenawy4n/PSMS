@@ -85,7 +85,7 @@ export const ReportsView: React.FC = () => {
           <div className="space-y-3">
             {[
               {
-                title: 'تقرير كفاءة محطات التحويل الفائقة 380 ك.ف - الربع الثالث 2026',
+                title: 'تقرير كفاءة محطات التحويل الفائقة 500/220 ك.ف - الربع الثالث 2026',
                 date: '2026-10-01',
                 size: '2.4 MB',
                 type: 'PDF',
@@ -114,13 +114,13 @@ export const ReportsView: React.FC = () => {
                   <div>
                     <h3 className="font-semibold text-slate-100">{rep.title}</h3>
                     <p className="text-[11px] text-slate-500 font-mono mt-0.5">
-                      تاريخ الإصدار: {rep.date} · الحجم: {rep.size}
+                      تاريخ الإصدار: {new Date(rep.date).toLocaleDateString('ar-EG')} · الحجم: {rep.size}
                     </p>
                   </div>
                 </div>
                 <button
                   onClick={handleGenerate}
-                  className="p-2 text-slate-400 hover:text-blue-400 rounded-lg hover:bg-slate-800 transition-colors"
+                  className="p-2 text-slate-400 hover:text-blue-400 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
                   title="تحميل التقرير"
                 >
                   <Download className="w-4 h-4" />

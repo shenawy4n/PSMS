@@ -198,7 +198,7 @@ export const CreatePTWModal: React.FC<CreatePTWModalProps> = ({
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
                 required
               >
-                <option value="">-- اختر المحطة --</option>
+                <option value="">-- اختار المحطة --</option>
                 {stations.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name} ({s.code})
@@ -241,7 +241,7 @@ export const CreatePTWModal: React.FC<CreatePTWModalProps> = ({
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="مثال: عزل وتأريض قاطع 132 ك.ف لأعمال الفحص الدوري وتبديل الحلقات العازلة"
+              placeholder="اكتب موضوع وتفاصيل العمل (مثال: عزل وتأريض قاطع 220 ك.ف لأعمال الفحص الدوري)"
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
               required
             />
@@ -275,7 +275,7 @@ export const CreatePTWModal: React.FC<CreatePTWModalProps> = ({
                 value={voltageLevelKv}
                 onChange={(e) => setVoltageLevelKv(Number(e.target.value))}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
-                placeholder="مثال: 11, 33, 132, 400"
+                placeholder="مثال: 11, 22, 66, 220, 500"
               />
             </div>
           </div>
@@ -289,7 +289,7 @@ export const CreatePTWModal: React.FC<CreatePTWModalProps> = ({
               rows={2}
               value={equipmentIsolated}
               onChange={(e) => setEquipmentIsolated(e.target.value)}
-              placeholder="حدد أرقام القواطع وسكاكين العزل المفصولة، مثل: قاطع الدورة CB-132-02 وسكاكين العزل DS-132-02A و DS-132-02B"
+              placeholder="اكتب أرقام القواطع وسكاكين العزل المفصولة، مثل: قاطع الدورة CB-220-02 وسكاكين العزل DS-220-02A و DS-220-02B"
               className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 leading-relaxed"
               required
             />

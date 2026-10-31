@@ -39,11 +39,11 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
     code: '',
     name: '',
     type: 'transmission',
-    region: 'المنطقة الوسطى',
-    governorate: 'الرياض',
+    region: '',
+    governorate: '',
     address: '',
-    voltage_level_kv: 132,
-    installed_capacity_mw: 100,
+    voltage_level_kv: 220,
+    installed_capacity_mw: 200,
     status: 'operational',
     description: '',
     latitude: undefined,
@@ -139,11 +139,11 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
         code: '',
         name: '',
         type: 'transmission',
-        region: 'المنطقة الوسطى',
-        governorate: 'الرياض',
+        region: '',
+        governorate: '',
         address: '',
-        voltage_level_kv: 132,
-        installed_capacity_mw: 100,
+        voltage_level_kv: 220,
+        installed_capacity_mw: 200,
         status: 'operational',
         description: '',
       });
@@ -282,7 +282,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Input
             label="رمز المحطة الفني (Station Code)"
-            placeholder="مثال: STN-132-N01"
+            placeholder="اكتب كود المحطة (مثال: TTA-001)"
             value={formData.code ?? ''}
             onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
             error={errors.code}
@@ -293,7 +293,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
 
           <Input
             label="اسم المحطة الرسمي الكامل"
-            placeholder="مثال: محطة تحويل شمال الرياض 132/33 ك.ف"
+            placeholder="اكتب اسم المحطة (مثال: محطة محولات طنطا 220/66 ك.ف)"
             value={formData.name ?? ''}
             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
             error={errors.name}
@@ -310,7 +310,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
               { value: 'distribution', label: 'محطة توزيع رئيسية (Distribution Substation)' },
               { value: 'generation', label: 'محطة توليد كهرباء (Power Generation Plant)' },
               { value: 'substation', label: 'محطة تحويل فرعية (Substation)' },
-              { value: 'solar_hybrid', label: 'محطة طاقة شمسية هجينة (Renewable Hybrid)' },
+              { value: 'solar_hybrid', label: 'محطة طاقة متجددة / شمسية (Renewable)' },
             ]}
             error={errors.type}
             disabled={isSubmitting}
@@ -340,7 +340,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
             error={errors.voltage_level_kv}
             required
             disabled={isSubmitting}
-            helperText="الجهد مثل: 11, 33, 110, 132, 380, 400 kV"
+            helperText="الجهد مثل: 11, 22, 66, 132, 220, 500 kV"
           />
 
           <Input
@@ -356,7 +356,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
 
           <Input
             label="المنطقة الجغرافية"
-            placeholder="مثال: المنطقة الوسطى"
+            placeholder="اكتب المنطقة (مثال: منطقة الدلتا)"
             value={formData.region ?? ''}
             onChange={(e) => setFormData({ ...formData, region: e.target.value })}
             error={errors.region}
@@ -366,7 +366,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
 
           <Input
             label="المحافظة / المدينة"
-            placeholder="مثال: الرياض"
+            placeholder="اكتب المحافظة (مثال: الغربية)"
             value={formData.governorate ?? ''}
             onChange={(e) => setFormData({ ...formData, governorate: e.target.value })}
             error={errors.governorate}
@@ -377,7 +377,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
 
         <Input
           label="العنوان والموقع التفصيلي"
-          placeholder="مثال: طريق الملك فهد، مجمع المحطات 14"
+          placeholder="اكتب العنوان بالتفصيل (مثال: طريق طنطا - المحلة الكبرى، المجمع الكهربائي)"
           value={formData.address ?? ''}
           onChange={(e) => setFormData({ ...formData, address: e.target.value })}
           error={errors.address}
@@ -390,7 +390,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
             label="خط العرض (Latitude - اختياري)"
             type="number"
             step="0.0001"
-            placeholder="24.7136"
+            placeholder="30.7865"
             value={formData.latitude ?? ''}
             onChange={(e) => setFormData({ ...formData, latitude: e.target.value ? Number(e.target.value) : undefined })}
             error={errors.latitude}
@@ -400,7 +400,7 @@ export const StationFormModal: React.FC<StationFormModalProps> = ({
             label="خط الطول (Longitude - اختياري)"
             type="number"
             step="0.0001"
-            placeholder="46.6753"
+            placeholder="31.0004"
             value={formData.longitude ?? ''}
             onChange={(e) => setFormData({ ...formData, longitude: e.target.value ? Number(e.target.value) : undefined })}
             error={errors.longitude}

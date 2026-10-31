@@ -5,49 +5,28 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
+// In-memory test store for test suites only (never persisted to localStorage in browser)
 const memoryStorage = new Map<string, string>();
 
-function getStorageItem(key: string): string | null {
-  try {
-    if (typeof globalThis !== 'undefined' && globalThis.localStorage) {
-      return globalThis.localStorage.getItem(key);
-    }
-  } catch {}
-  return memoryStorage.get(key) || null;
-}
+// Clean up any stale credentials from localStorage to enforce production environment configuration
+try {
+  if (typeof globalThis !== 'undefined' && globalThis.localStorage) {
+    globalThis.localStorage.removeItem('psms_supabase_url');
+    globalThis.localStorage.removeItem('psms_supabase_key');
+  }
+} catch {}
 
-function setStorageItem(key: string, value: string): void {
-  try {
-    if (typeof globalThis !== 'undefined' && globalThis.localStorage) {
-      globalThis.localStorage.setItem(key, value);
-      return;
-    }
-  } catch {}
-  memoryStorage.set(key, value);
-}
-
-function removeStorageItem(key: string): void {
-  try {
-    if (typeof globalThis !== 'undefined' && globalThis.localStorage) {
-      globalThis.localStorage.removeItem(key);
-    }
-  } catch {}
-  memoryStorage.delete(key);
-}
-
-// Read from Vite environment variables or dynamic local storage for easy zero-restart setup
+// Read strictly from Vite environment variables (or in-memory mock for test runners)
 export function getActiveSupabaseUrl(): string {
-  const custom = getStorageItem('psms_supabase_url');
-  if (custom && custom.trim() && !custom.includes('your-project-id')) {
-    return custom.trim();
+  if (memoryStorage.has('psms_supabase_url')) {
+    return (memoryStorage.get('psms_supabase_url') || '').trim();
   }
   return (import.meta.env.VITE_SUPABASE_URL || '').trim();
 }
 
 export function getActiveSupabaseKey(): string {
-  const custom = getStorageItem('psms_supabase_key');
-  if (custom && custom.trim() && !custom.includes('your-anon-or-publishable-key')) {
-    return custom.trim();
+  if (memoryStorage.has('psms_supabase_key')) {
+    return (memoryStorage.get('psms_supabase_key') || '').trim();
   }
   return (
     import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
@@ -164,12 +143,11 @@ export interface ConnectionDiagnosticResult {
 export function getSupabaseConfig() {
   const url = getActiveSupabaseUrl();
   const key = getActiveSupabaseKey();
-  const isCustom = typeof window !== 'undefined' && Boolean(localStorage.getItem('psms_supabase_url'));
   return {
-    url: url || 'غير معرّف (يرجى ضبط VITE_SUPABASE_URL)',
+    url: url || 'غير معرّف (يرجى ضبط VITE_SUPABASE_URL في متغيرات النشر)',
     isConfigured: isSupabaseConfigured(),
     hasKey: Boolean(key && !key.includes('your-anon-or-publishable-key')),
-    isCustom,
+    isCustom: memoryStorage.has('psms_supabase_url'),
   };
 }
 
@@ -178,16 +156,16 @@ let clientInstance: SupabaseClient | null = null;
 let currentClientKey = '';
 
 export function setCustomCredentials(url: string, key: string): boolean {
-  if (url.trim()) setStorageItem('psms_supabase_url', url.trim());
-  if (key.trim()) setStorageItem('psms_supabase_key', key.trim());
+  memoryStorage.set('psms_supabase_url', url.trim());
+  memoryStorage.set('psms_supabase_key', key.trim());
   clientInstance = null;
   currentClientKey = '';
   return true;
 }
 
 export function clearCustomCredentials(): void {
-  removeStorageItem('psms_supabase_url');
-  removeStorageItem('psms_supabase_key');
+  memoryStorage.delete('psms_supabase_url');
+  memoryStorage.delete('psms_supabase_key');
   clientInstance = null;
   currentClientKey = '';
 }

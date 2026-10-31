@@ -72,20 +72,21 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const isSupabaseMode = isSupabaseConfigured();
   const [profiles, setProfiles] = useState<UserProfile[]>(INITIAL_PROFILES);
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(isSupabaseMode ? null : INITIAL_PROFILES[0]);
-  const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(isSupabaseMode);
-  const [isDemoMode, setIsDemoMode] = useState<boolean>(!isSupabaseMode);
+  // Startup Security: Always initialize currentUser as null so login is enforced
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  // Startup Security: Always start with loading true until session verification finishes
+  const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(true);
+  // Startup Security: Demo mode must never be enabled automatically
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(false);
 
   // Granular connection & session status
   const [connectionStatus, setConnectionStatus] = useState<SupabaseConnectionStatus>(
     isSupabaseMode ? 'unverified' : 'unconfigured'
   );
   const [connectionMessage, setConnectionMessage] = useState<string>(
-    isSupabaseMode ? 'لم يتم التحقق من الاتصال بعد' : 'إعدادات الاتصال بـ Supabase غير مكتملة'
+    isSupabaseMode ? 'لم يتم التحقق من الاتصال بعد' : 'متغيرات بيئة Supabase غير معرّفة في بيئة النشر'
   );
-  const [sessionStatus, setSessionStatus] = useState<AuthSessionStatus>(
-    isSupabaseMode ? 'validating' : 'demo_mode'
-  );
+  const [sessionStatus, setSessionStatus] = useState<AuthSessionStatus>('validating');
 
   const [isRecoveryMode, setIsRecoveryMode] = useState<boolean>(() => {
     if (typeof window !== 'undefined' && window.location.hash) {
@@ -238,6 +239,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (err) {
         console.error('Auth session init error:', err);
         if (isMountedRef.current && reqId === requestIdRef.current) {
+          const raw = err instanceof Error ? err.message : String(err);
+          const isNet = raw.includes('Failed to fetch') || raw.includes('NetworkError') || raw.includes('network');
+          if (isNet) {
+            setConnectionStatus('network_error');
+            setConnectionMessage('تعذر الوصول لخادم Supabase (تحقق من اتصال الإنترنت)');
+          }
           setCurrentUser(null);
           setSessionStatus('unauthenticated');
         }
@@ -390,14 +397,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signIn = async (email: string, password?: string): Promise<{ success: boolean; error?: string }> => {
-    if (isSupabaseMode && !isDemoMode) {
+    if (isSupabaseMode) {
       const client = getSupabase();
       if (!client) {
         setSessionStatus('unauthenticated');
-        return { success: false, error: 'تعذر الاتصال بـ Supabase' };
+        return { success: false, error: 'تعذر تهيئة عميل الاتصال بقاعدة البيانات.' };
       }
       if (!password) {
-        return { success: false, error: 'يرجى إدخال كلمة المرور' };
+        return { success: false, error: 'يرجى إدخال كلمة المرور للمتابعة.' };
       }
 
       setSessionStatus('validating');
@@ -408,7 +415,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       try {
-        const { data, error } = await client.auth.signInWithPassword({ email, password });
+        const { data, error } = await client.auth.signInWithPassword({ email: email.trim(), password });
         if (!isMountedRef.current || reqId !== requestIdRef.current) {
           setSessionStatus('unauthenticated');
           return { success: false, error: 'تم إلغاء عملية تسجيل الدخول' };
@@ -416,6 +423,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (error) {
           setSessionStatus('unauthenticated');
+          const msg = error.message || '';
+          if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('network')) {
+            setConnectionStatus('network_error');
+            setConnectionMessage('تعذر الوصول لخادم Supabase (تحقق من اتصال الإنترنت)');
+            return {
+              success: false,
+              error: 'تعذر الاتصال بخادم قاعدة البيانات. يرجى التحقق من اتصال الإنترنت والمحاولة مرة أخرى.',
+            };
+          }
           const formatted = formatArabicError(error);
           return { success: false, error: formatted.message };
         }
@@ -472,6 +488,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } catch (err) {
         setSessionStatus('unauthenticated');
+        const raw = err instanceof Error ? err.message : String(err);
+        if (raw.includes('Failed to fetch') || raw.includes('NetworkError') || raw.includes('network')) {
+          setConnectionStatus('network_error');
+          setConnectionMessage('تعذر الوصول لخادم Supabase (تحقق من اتصال الإنترنت)');
+          return {
+            success: false,
+            error: 'تعذر الاتصال بخادم قاعدة البيانات. يرجى التحقق من اتصال الإنترنت والمحاولة مرة أخرى.',
+          };
+        }
         const formatted = formatArabicError(err);
         return { success: false, error: formatted.message };
       }

@@ -134,7 +134,7 @@ export const EmployeeListView: React.FC<EmployeeListViewProps> = ({ onOpenAssign
           <Search className="absolute right-3 top-2.5 w-4 h-4 text-slate-500" />
           <input
             type="text"
-            placeholder="البحث بالاسم، الرقم الوظيفي، البريد، أو الإدارة..."
+            placeholder="دور باسم الموظف، الرقم الوظيفي، البريد، أو الإدارة..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pr-9 pl-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
@@ -169,8 +169,21 @@ export const EmployeeListView: React.FC<EmployeeListViewProps> = ({ onOpenAssign
       </div>
 
       {/* Employee List Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {filteredEmployees.map((emp) => {
+      {filteredEmployees.length === 0 ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center space-y-3">
+          <Users className="w-10 h-10 text-slate-600 mx-auto" />
+          <h3 className="text-sm font-semibold text-slate-300">
+            {allProfiles.length === 0 ? 'مفيش موظفين مسجلين حتى الآن.' : 'مفيش موظفين مطابقين لعملية البحث الحالية.'}
+          </h3>
+          <p className="text-xs text-slate-500 max-w-sm mx-auto">
+            {allProfiles.length === 0
+              ? 'تقدر تبدأ بإضافة أول ملف موظف للنظام بالضغط على زر "إضافة ملف موظف".'
+              : 'جرب تغير كلمات البحث أو فلاتر الصلاحيات والحالة.'}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {filteredEmployees.map((emp) => {
           const isCurrentUser = currentUser?.id === emp.id;
           const assignedCount = emp.assigned_station_ids?.length || 0;
           const canEditThisProfile =
@@ -291,6 +304,7 @@ export const EmployeeListView: React.FC<EmployeeListViewProps> = ({ onOpenAssign
           );
         })}
       </div>
+      )}
 
       {/* Employee Create/Edit Modal */}
       <EmployeeFormModal

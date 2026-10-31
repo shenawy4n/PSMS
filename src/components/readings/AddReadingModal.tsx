@@ -142,6 +142,7 @@ export const AddReadingModal: React.FC<AddReadingModalProps> = ({
             label="الجهد الكهربائي (kV)"
             type="number"
             step="0.01"
+            placeholder="مثال: 220.0"
             value={voltage}
             onChange={(e) => setVoltage(e.target.value)}
             error={errors.voltage_kv}
@@ -152,6 +153,7 @@ export const AddReadingModal: React.FC<AddReadingModalProps> = ({
             label="الحمل الفعال (Active MW)"
             type="number"
             step="0.1"
+            placeholder="مثال: 120.5"
             value={loadMW}
             onChange={(e) => setLoadMW(e.target.value)}
             error={errors.active_power_mw}
@@ -162,6 +164,7 @@ export const AddReadingModal: React.FC<AddReadingModalProps> = ({
             label="الحمل غير الفعال (Reactive MVAR)"
             type="number"
             step="0.1"
+            placeholder="مثال: 18.2"
             value={reactiveMVAR}
             onChange={(e) => setReactiveMVAR(e.target.value)}
             error={errors.reactive_power_mvar}
@@ -171,6 +174,7 @@ export const AddReadingModal: React.FC<AddReadingModalProps> = ({
             label="التردد الشبكي (Hz)"
             type="number"
             step="0.01"
+            placeholder="50.00"
             value={frequency}
             onChange={(e) => setFrequency(e.target.value)}
             error={errors.frequency_hz}
@@ -182,6 +186,7 @@ export const AddReadingModal: React.FC<AddReadingModalProps> = ({
             label="معامل القدرة (Power Factor)"
             type="number"
             step="0.001"
+            placeholder="0.98"
             value={powerFactor}
             onChange={(e) => setPowerFactor(e.target.value)}
             error={errors.power_factor}
@@ -192,6 +197,7 @@ export const AddReadingModal: React.FC<AddReadingModalProps> = ({
             label="حرارة زيت المحول (°C)"
             type="number"
             step="0.1"
+            placeholder="مثال: 52.0"
             value={temp}
             onChange={(e) => setTemp(e.target.value)}
             error={errors.transformer_temp_celsius}
@@ -201,6 +207,7 @@ export const AddReadingModal: React.FC<AddReadingModalProps> = ({
             label="ضغط غاز SF6 (bar)"
             type="number"
             step="0.1"
+            placeholder="مثال: 6.2"
             value={gasPressure}
             onChange={(e) => setGasPressure(e.target.value)}
             error={errors.sf6_gas_pressure_bar}
@@ -224,7 +231,7 @@ export const AddReadingModal: React.FC<AddReadingModalProps> = ({
         {isAnomaly && (
           <Input
             label="ملاحظات الحالة الشاذة"
-            placeholder="سبب التذبذب أو الارتفاع..."
+            placeholder="اكتب سبب التذبذب أو الارتفاع والملاحظات الميدانية..."
             value={anomalyNotes}
             onChange={(e) => setAnomalyNotes(e.target.value)}
           />

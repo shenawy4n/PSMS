@@ -35,7 +35,7 @@ import { Button } from '../ui/Button';
 interface DashboardViewProps {
   onNavigate: (tabId: string) => void;
   onOpenNewStationModal: () => void;
-  onOpenSetupModal: () => void;
+  onOpenSetupModal?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -44,7 +44,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenSetupModal,
 }) => {
   const { stations, faultReports, maintenanceOrders, stationReadings } = useStations();
-  const { currentUser, role, isSupabaseMode } = useAuth();
+  const { currentUser, role } = useAuth();
 
   // Metrics calculated strictly from real authorized station data
   const totalStations = stations.length;
@@ -94,27 +94,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Supabase Integration Callout Banner if not yet configured */}
-      {!isSupabaseMode && (
-        <div className="bg-slate-900 border border-amber-900/50 rounded-xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="flex items-start gap-3.5">
-            <div className="w-9 h-9 rounded-lg bg-amber-950/60 border border-amber-800/80 flex items-center justify-center shrink-0 text-amber-400">
-              <Database className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-slate-100">
-                حالة البيئة: وضع التهيئة والتحقق الأولي (Supabase Local Mode)
-              </h2>
-              <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-                التطبيق يعمل حالياً في وضع التهيئة والتحقق. لربطه بقاعدة بيانات Supabase الخاصة بك مع تطبيق سياسات RLS وجداول الإنتاج، يرجى إدخال الرابط والمفتاح أو تشغيل ملف الترحيل SQL.
-              </p>
-            </div>
-          </div>
-          <Button variant="secondary" size="sm" onClick={onOpenSetupModal} className="shrink-0">
-            تعليمات الربط وتشغيل Migration
-          </Button>
-        </div>
-      )}
 
       {/* Header with Title and Quick Actions */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-2 border-b border-slate-800">
@@ -324,7 +303,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </PieChart>
               </ResponsiveContainer>
             ) : (
-              <p className="text-xs text-slate-500">لا توجد محطات مسجلة</p>
+              <p className="text-xs text-slate-500">مفيش محطات مسجلة</p>
             )}
           </div>
           <div className="grid grid-cols-3 gap-2 pt-3 border-t border-slate-800 text-center text-xs">
@@ -359,23 +338,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           </div>
           <div className="space-y-2.5">
-            {stationReadings.slice(0, 3).map((r) => (
-              <div
-                key={r.id}
-                className="p-3 bg-slate-950 border border-slate-800/80 rounded-lg flex items-center justify-between text-xs"
-              >
-                <div>
-                  <p className="font-medium text-slate-200">{r.station_name || r.station_code}</p>
-                  <p className="text-[11px] text-slate-500 font-mono mt-0.5">
-                    سُجلت بواسطة: {r.recorder_name} · {new Date(r.reading_timestamp).toLocaleDateString('ar-SA')}
-                  </p>
+            {stationReadings.length > 0 ? (
+              stationReadings.slice(0, 3).map((r) => (
+                <div
+                  key={r.id}
+                  className="p-3 bg-slate-950 border border-slate-800/80 rounded-lg flex items-center justify-between text-xs"
+                >
+                  <div>
+                    <p className="font-medium text-slate-200">{r.station_name || r.station_code}</p>
+                    <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                      سُجلت بواسطة: {r.recorder_name} · {new Date(r.reading_timestamp).toLocaleDateString('ar-EG')}
+                    </p>
+                  </div>
+                  <div className="text-left font-mono">
+                    <span className="text-emerald-400 font-bold tabular-nums">{r.voltage_kv} ك.ف</span>
+                    <p className="text-[11px] text-slate-400 tabular-nums">{r.active_power_mw} م.و</p>
+                  </div>
                 </div>
-                <div className="text-left font-mono">
-                  <span className="text-emerald-400 font-bold tabular-nums">{r.voltage_kv} ك.ف</span>
-                  <p className="text-[11px] text-slate-400 tabular-nums">{r.active_power_mw} م.و</p>
-                </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              <p className="text-xs text-slate-500 py-6 text-center">مفيش قراءات تشغيلية مسجلة حتى الآن.</p>
+            )}
           </div>
         </div>
 
@@ -392,23 +375,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           </div>
           <div className="space-y-2.5">
-            {maintenanceOrders.slice(0, 3).map((m) => (
-              <div
-                key={m.id}
-                className="p-3 bg-slate-950 border border-slate-800/80 rounded-lg flex items-center justify-between text-xs"
-              >
-                <div>
-                  <p className="font-medium text-slate-200">{m.title}</p>
-                  <p className="text-[11px] text-slate-500 font-mono mt-0.5">
-                    {m.station_name} · أمر: {m.order_code}
-                  </p>
+            {maintenanceOrders.length > 0 ? (
+              maintenanceOrders.slice(0, 3).map((m) => (
+                <div
+                  key={m.id}
+                  className="p-3 bg-slate-950 border border-slate-800/80 rounded-lg flex items-center justify-between text-xs"
+                >
+                  <div>
+                    <p className="font-medium text-slate-200">{m.title}</p>
+                    <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                      {m.station_name} · أمر: {m.order_code}
+                    </p>
+                  </div>
+                  <div className="text-left">
+                    <span className="text-amber-400 font-medium">قيد التنفيذ</span>
+                    <p className="text-[11px] text-slate-400">{m.lead_technician_name}</p>
+                  </div>
                 </div>
-                <div className="text-left">
-                  <span className="text-amber-400 font-medium">قيد التنفيذ</span>
-                  <p className="text-[11px] text-slate-400">{m.lead_technician_name}</p>
-                </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              <p className="text-xs text-slate-500 py-6 text-center">مفيش أوامر صيانة مسجلة حالياً.</p>
+            )}
           </div>
         </div>
       </div>

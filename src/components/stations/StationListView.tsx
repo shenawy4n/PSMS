@@ -143,7 +143,7 @@ export const StationListView: React.FC<StationListViewProps> = ({
       s.region,
       s.governorate,
       getStationStatusInfo(s.status).label,
-      new Date(s.created_at).toLocaleDateString('ar-SA'),
+      new Date(s.created_at).toLocaleDateString('ar-EG'),
     ]);
 
     const csvContent =
@@ -312,7 +312,21 @@ export const StationListView: React.FC<StationListViewProps> = ({
       <div className="block md:hidden space-y-3">
         {filteredStations.length === 0 ? (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center text-slate-500">
-            <p className="text-sm">لا توجد محطات مطابقة لمعايير البحث الحالية</p>
+            <Zap className="w-8 h-8 mx-auto text-slate-600 mb-2 opacity-50" />
+            <p className="text-sm font-semibold text-slate-300">
+              {stations.length === 0 ? 'مفيش محطات كهرباء مسجلة حتى الآن.' : 'مفيش نتائج مطابقة لمعايير البحث الحالية.'}
+            </p>
+            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+              {stations.length === 0
+                ? 'ابدأ بإضافة أول محطة تحويل أو توليد أو توزيع لبدء متابعة القياسات والأصول.'
+                : 'جرب البحث باسم المحطة أو الرمز أو المحافظة، أو امسح الفلاتر.'}
+            </p>
+            {stations.length === 0 && canAdd && (
+              <Button size="sm" onClick={onOpenCreateModal} className="mt-4 mx-auto">
+                <Plus className="w-4 h-4" />
+                <span>إضافة أول محطة</span>
+              </Button>
+            )}
           </div>
         ) : (
           paginatedStations.map((station) => {
@@ -394,7 +408,21 @@ export const StationListView: React.FC<StationListViewProps> = ({
               {filteredStations.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="py-12 text-center text-slate-500">
-                    <p className="text-sm">لا توجد محطات مطابقة لمعايير البحث الحالية</p>
+                    <Zap className="w-8 h-8 mx-auto text-slate-600 mb-2 opacity-50" />
+                    <p className="text-sm font-semibold text-slate-300">
+                      {stations.length === 0 ? 'مفيش محطات كهرباء مسجلة حتى الآن.' : 'مفيش نتائج مطابقة لمعايير البحث الحالية.'}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                      {stations.length === 0
+                        ? 'ابدأ بإضافة أول محطة تحويل أو توليد أو توزيع لبدء متابعة القياسات والأصول.'
+                        : 'جرب البحث باسم المحطة أو الرمز أو المحافظة، أو امسح الفلاتر.'}
+                    </p>
+                    {stations.length === 0 && canAdd && (
+                      <Button size="sm" onClick={onOpenCreateModal} className="mt-4 mx-auto">
+                        <Plus className="w-4 h-4" />
+                        <span>إضافة أول محطة</span>
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ) : (
@@ -437,7 +465,7 @@ export const StationListView: React.FC<StationListViewProps> = ({
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-slate-400 font-mono text-[11px] whitespace-nowrap">
-                        {new Date(station.updated_at || station.created_at).toLocaleDateString('ar-SA')}
+                        {new Date(station.updated_at || station.created_at).toLocaleDateString('ar-EG')}
                       </td>
                       <td
                         className="py-3.5 px-4 whitespace-nowrap text-center"

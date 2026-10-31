@@ -191,7 +191,7 @@ export const CreateInsulationTestModal: React.FC<CreateInsulationTestModalProps>
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
                 required
               >
-                <option value="">-- اختر المحطة --</option>
+                <option value="">-- اختار المحطة --</option>
                 {stations.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name} ({s.code})

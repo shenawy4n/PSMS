@@ -52,13 +52,41 @@ export const stationFormSchema = z.object({
 export type StationFormInput = z.infer<typeof stationFormSchema>;
 
 /**
- * Standard mapping for administrative regions in Saudi Arabia based on governorate / city.
+ * Standard mapping for administrative regions based on governorate / city.
+ * Supports Egyptian electricity network regions (EETC) as well as existing regional zones.
  * Used for high-level UI filtering and reporting without requiring a non-existent column in stations table.
  */
 export const getRegionByGovernorate = (governorate?: string | null): string => {
-  if (!governorate) return 'المنطقة الوسطى';
+  if (!governorate || !governorate.trim()) return 'المنطقة الوسطى';
   const gov = governorate.trim();
 
+  // Egyptian Electricity Grid Regions
+  // منطقة القاهرة الكبرى
+  if (/القاهرة|الجيزة|القليوبية|حلوان|أكتوبر|العاصمة الإدارية/i.test(gov)) {
+    return 'منطقة القاهرة';
+  }
+  // منطقة الإسكندرية وغرب الدلتا
+  if (/الإسكندرية|اسكندرية|البحيرة|دمنهور|مطروح|الساحل الشمالي|العلمين/i.test(gov)) {
+    return 'منطقة الإسكندرية وغرب الدلتا';
+  }
+  // منطقة الدلتا
+  if (/الدلتا|الغربية|طنطا|المحلة|الدقهلية|المنصورة|الشرقية|الزقازيق|العاشر|المنوفية|شبين|كفر الشيخ|دمياط/i.test(gov)) {
+    return 'منطقة الدلتا';
+  }
+  // منطقة القناة وسيناء
+  if (/القناة|السويس|الإسماعيلية|بورسعيد|سيناء|العريش|شرم الشيخ|الطور|البحر الأحمر|الغردقة|الزعفرانة|رأس غارب/i.test(gov)) {
+    return 'منطقة القناة وسيناء';
+  }
+  // منطقة مصر الوسطى
+  if (/مصر الوسطى|بني سويف|الكريمات|الفيوم|المنيا|أسيوط/i.test(gov)) {
+    return 'منطقة مصر الوسطى';
+  }
+  // منطقة مصر العليا
+  if (/مصر العليا|سوهاج|قنا|الأقصر|اسوان|أسوان|الوادي الجديد|توشكى|السد العالي/i.test(gov)) {
+    return 'منطقة مصر العليا';
+  }
+
+  // Saudi Arabia Administrative Regions (retained for backward compatibility and testing)
   // المنطقة الشرقية
   if (/الشرقية|الدمام|الخبر|الظهران|الأحساء|الجبيل|القطيف|حفر الباطن|الخفجي|رأس تنورة|بقيق|النعيرية/i.test(gov)) {
     return 'المنطقة الشرقية';

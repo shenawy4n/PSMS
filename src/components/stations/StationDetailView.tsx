@@ -244,7 +244,7 @@ export const StationDetailView: React.FC<StationDetailViewProps> = ({
             <div className="space-y-3 text-xs">
               <div className="flex justify-between py-1.5 border-b border-slate-800/60">
                 <span className="text-slate-400">القطاع / الشركة المشغلة:</span>
-                <span className="text-slate-200 font-medium">{station.organization_name || 'الشركة الوطنية لنقل الكهرباء'}</span>
+                <span className="text-slate-200 font-medium">{station.organization_name || 'الشركة المصرية لنقل الكهرباء (EETC)'}</span>
               </div>
               <div className="flex justify-between py-1.5 border-b border-slate-800/60">
                 <span className="text-slate-400">تاريخ بدء التشغيل التجاري:</span>
@@ -261,13 +261,13 @@ export const StationDetailView: React.FC<StationDetailViewProps> = ({
               <div className="flex justify-between py-1.5 border-b border-slate-800/60">
                 <span className="text-slate-400">تاريخ التسجيل بالمنظومة:</span>
                 <span className="text-slate-200 font-mono">
-                  {new Date(station.created_at).toLocaleString('ar-SA')}
+                  {new Date(station.created_at).toLocaleString('ar-EG')}
                 </span>
               </div>
               <div className="flex justify-between py-1.5">
                 <span className="text-slate-400">آخر تحديث فني معتمد:</span>
                 <span className="text-slate-200 font-mono">
-                  {station.updated_at ? new Date(station.updated_at).toLocaleString('ar-SA') : 'مطابق لتاريخ التسجيل'}
+                  {station.updated_at ? new Date(station.updated_at).toLocaleString('ar-EG') : 'مطابق لتاريخ التسجيل'}
                 </span>
               </div>
             </div>
@@ -308,7 +308,7 @@ export const StationDetailView: React.FC<StationDetailViewProps> = ({
 
           {thisAssignments.length === 0 ? (
             <div className="py-12 text-center text-slate-500 text-xs">
-              لا يوجد طاقم عمل معين حالياً لهذه المحطة.
+              مفيش طاقم عمل معين في المحطة دي حالياً.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -330,7 +330,7 @@ export const StationDetailView: React.FC<StationDetailViewProps> = ({
                       <td className="py-3 px-3 font-medium text-white">{a.user_name || 'موظف تشغيل'}</td>
                       <td className="py-3 px-3 text-slate-300">{a.assignment_role}</td>
                       <td className="py-3 px-3 font-mono text-slate-400">
-                        {new Date(a.assigned_at).toLocaleDateString('ar-SA')}
+                        {new Date(a.assigned_at).toLocaleDateString('ar-EG')}
                       </td>
                       <td className="py-3 px-3">
                         <span
@@ -382,7 +382,7 @@ export const StationDetailView: React.FC<StationDetailViewProps> = ({
 
           {thisAssets.length === 0 ? (
             <div className="py-12 text-center text-slate-500 text-xs">
-              لم يتم تسجيل معدات أو أصول رئيسية لهذه المحطة بعد.
+              مفيش معدات أو أصول رئيسية مسجلة في المحطة دي حتى الآن.
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -435,7 +435,7 @@ export const StationDetailView: React.FC<StationDetailViewProps> = ({
 
           {thisReadings.length === 0 ? (
             <div className="py-12 text-center text-slate-500 text-xs">
-              لم تسجل قراءات تشغيلية لهذه المحطة حتى الآن.
+              مفيش قراءات تشغيلية مسجلة للمحطة دي حتى الآن.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -456,7 +456,7 @@ export const StationDetailView: React.FC<StationDetailViewProps> = ({
                   {thisReadings.map((r) => (
                     <tr key={r.id} className="hover:bg-slate-800/30">
                       <td className="py-3 px-3 text-slate-300">
-                        {new Date(r.reading_timestamp).toLocaleString('ar-SA')}
+                        {new Date(r.reading_timestamp).toLocaleString('ar-EG')}
                       </td>
                       <td className="py-3 px-3 text-emerald-400 font-bold tabular-nums">{r.voltage_kv}</td>
                       <td className="py-3 px-3 text-blue-400 font-bold tabular-nums">{r.active_power_mw}</td>
@@ -491,7 +491,7 @@ export const StationDetailView: React.FC<StationDetailViewProps> = ({
 
             {thisFaults.length === 0 ? (
               <div className="py-8 text-center text-slate-500 text-xs">
-                لا توجد بلاغات أعطال نشطة في هذه المحطة.
+                مفيش بلاغات أعطال حالياً في المحطة دي.
               </div>
             ) : (
               <div className="space-y-3">
@@ -515,7 +515,7 @@ export const StationDetailView: React.FC<StationDetailViewProps> = ({
                       <div className="text-left font-mono shrink-0">
                         <span className="text-amber-400 font-medium">قيد المعالجة</span>
                         <p className="text-[11px] text-slate-500">
-                          {new Date(f.occurred_at).toLocaleDateString('ar-SA')}
+                          {new Date(f.occurred_at).toLocaleDateString('ar-EG')}
                         </p>
                       </div>
                     </div>
@@ -532,7 +532,7 @@ export const StationDetailView: React.FC<StationDetailViewProps> = ({
             </h2>
             {thisMaintenance.length === 0 ? (
               <div className="py-8 text-center text-slate-500 text-xs">
-                لا توجد أوامر صيانة مرتبطة بهذه المحطة.
+                مفيش أوامر صيانة مسجلة للمحطة دي حالياً.
               </div>
             ) : (
               <div className="space-y-3">

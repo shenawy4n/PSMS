@@ -74,75 +74,87 @@ export const FaultReportsView: React.FC<FaultReportsViewProps> = ({ onOpenAddMod
       </div>
 
       <div className="space-y-3">
-        {filteredFaults.map((fault) => {
-          const sev = getFaultSeverityInfo(fault.severity);
-          const st = getStatusArabic(fault.status);
-
-          return (
-            <div
-              key={fault.id}
-              className="p-5 bg-slate-900 border border-slate-800 rounded-xl space-y-3"
-            >
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-2 border-b border-slate-800/80">
-                <div className="flex items-center gap-3">
-                  <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-800">
-                    {fault.report_code}
-                  </span>
-                  <span className={`text-xs px-2 py-0.5 rounded border font-medium ${sev.bg} ${sev.text}`}>
-                    الخطورة: {sev.label}
-                  </span>
-                  <span className={`text-xs px-2.5 py-0.5 rounded border font-medium ${st.color}`}>
-                    {st.label}
-                  </span>
-                </div>
-                <span className="text-xs text-slate-500 font-mono">
-                  تاريخ الحدوث: {new Date(fault.occurred_at).toLocaleString('ar-SA')}
-                </span>
-              </div>
-
-              <div>
-                <h3 className="text-base font-semibold text-white">{fault.title}</h3>
-                <p className="text-xs text-slate-400 mt-1 leading-relaxed">{fault.description}</p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs text-slate-400 font-mono pt-2 border-t border-slate-800/60">
-                <div>المحطة: <span className="text-slate-200 font-sans">{fault.station_name}</span></div>
-                <div>المعدة: <span className="text-slate-200 font-sans">{fault.asset_name || 'عام بالموقع'}</span></div>
-                <div>المبلغ: <span className="text-slate-200 font-sans">{fault.reporter_name}</span></div>
-              </div>
-
-              {canChangeStatus && (
-                <div className="flex items-center gap-2 pt-2 text-xs">
-                  <span className="text-slate-500">تحديث حالة البلاغ:</span>
-                  {fault.status === 'open' && (
-                    <button
-                      onClick={() => updateFaultStatus(fault.id, 'in_progress')}
-                      className="px-2.5 py-1 rounded bg-amber-950/60 text-amber-300 border border-amber-800 hover:bg-amber-900/50 cursor-pointer"
-                    >
-                      بدء المعالجة الميدانية
-                    </button>
-                  )}
-                  {fault.status === 'in_progress' && (
-                    <button
-                      onClick={() => updateFaultStatus(fault.id, 'resolved', 'تم إصلاح العطل واستعادة التغذية')}
-                      className="px-2.5 py-1 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800 hover:bg-emerald-900/50 cursor-pointer"
-                    >
-                      اعتماد اكتمال الإصلاح
-                    </button>
-                  )}
-                  {fault.status === 'resolved' && (
-                    <button
-                      onClick={() => updateFaultStatus(fault.id, 'closed')}
-                      className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 cursor-pointer"
-                    >
-                      إغلاق البلاغ نهائياً
-                    </button>
-                  )}
-                </div>
-              )}
+        {filteredFaults.length === 0 ? (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center space-y-3">
+            <div className="w-12 h-12 rounded-full bg-slate-800/80 flex items-center justify-center mx-auto text-slate-400">
+              <AlertTriangle className="w-6 h-6" />
             </div>
-          );
-        })}
+            <p className="text-sm font-semibold text-white">
+              {faultReports.length === 0 ? 'مفيش بلاغات أعطال حالياً.' : 'مفيش بلاغات أعطال مطابقة للفلتر المحدد.'}
+            </p>
+            <p className="text-xs text-slate-400">جميع المحطات والمعدات تعمل في النطاق الطبيعي دون بلاغات مسجلة.</p>
+          </div>
+        ) : (
+          filteredFaults.map((fault) => {
+            const sev = getFaultSeverityInfo(fault.severity);
+            const st = getStatusArabic(fault.status);
+
+            return (
+              <div
+                key={fault.id}
+                className="p-5 bg-slate-900 border border-slate-800 rounded-xl space-y-3"
+              >
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-2 border-b border-slate-800/80">
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-800">
+                      {fault.report_code}
+                    </span>
+                    <span className={`text-xs px-2 py-0.5 rounded border font-medium ${sev.bg} ${sev.text}`}>
+                      الخطورة: {sev.label}
+                    </span>
+                    <span className={`text-xs px-2.5 py-0.5 rounded border font-medium ${st.color}`}>
+                      {st.label}
+                    </span>
+                  </div>
+                  <span className="text-xs text-slate-500 font-mono">
+                    تاريخ الحدوث: {new Date(fault.occurred_at).toLocaleString('ar-EG')}
+                  </span>
+                </div>
+
+                <div>
+                  <h3 className="text-base font-semibold text-white">{fault.title}</h3>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">{fault.description}</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs text-slate-400 font-mono pt-2 border-t border-slate-800/60">
+                  <div>المحطة: <span className="text-slate-200 font-sans">{fault.station_name}</span></div>
+                  <div>المعدة: <span className="text-slate-200 font-sans">{fault.asset_name || 'عام بالموقع'}</span></div>
+                  <div>المبلغ: <span className="text-slate-200 font-sans">{fault.reporter_name}</span></div>
+                </div>
+
+                {canChangeStatus && (
+                  <div className="flex items-center gap-2 pt-2 text-xs">
+                    <span className="text-slate-500">تحديث حالة البلاغ:</span>
+                    {fault.status === 'open' && (
+                      <button
+                        onClick={() => updateFaultStatus(fault.id, 'in_progress')}
+                        className="px-2.5 py-1 rounded bg-amber-950/60 text-amber-300 border border-amber-800 hover:bg-amber-900/50 cursor-pointer"
+                      >
+                        بدء المعالجة الميدانية
+                      </button>
+                    )}
+                    {fault.status === 'in_progress' && (
+                      <button
+                        onClick={() => updateFaultStatus(fault.id, 'resolved', 'تم إصلاح العطل واستعادة التغذية')}
+                        className="px-2.5 py-1 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800 hover:bg-emerald-900/50 cursor-pointer"
+                      >
+                        اعتماد اكتمال الإصلاح
+                      </button>
+                    )}
+                    {fault.status === 'resolved' && (
+                      <button
+                        onClick={() => updateFaultStatus(fault.id, 'closed')}
+                        className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 cursor-pointer"
+                      >
+                        إغلاق البلاغ نهائياً
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );

@@ -304,7 +304,7 @@ export const CreateMaintenanceModal: React.FC<CreateMaintenanceModalProps> = ({
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="مثال: فحص دوري واختبار مقاومة العزل لقاطع الدورة 132 ك.ف"
+              placeholder="اكتب عنوان أمر الصيانة (مثال: فحص دوري واختبار مقاومة العزل لقاطع الدورة 220 ك.ف)"
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
               required
             />
@@ -319,7 +319,7 @@ export const CreateMaintenanceModal: React.FC<CreateMaintenanceModalProps> = ({
               rows={3}
               value={scopeOfWork}
               onChange={(e) => setScopeOfWork(e.target.value)}
-              placeholder="صف بالتفصيل خطوات العمل، متطلبات الفصل والعزل، والاختبارات المطلوبة قبل الإرجاع للخدمة..."
+              placeholder="اكتب بالتفصيل خطوات العمل، متطلبات الفصل والعزل، والاختبارات المطلوبة قبل الإرجاع للخدمة..."
               className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 leading-relaxed"
               required
             />
@@ -364,7 +364,7 @@ export const CreateMaintenanceModal: React.FC<CreateMaintenanceModalProps> = ({
                 onChange={(e) => setLeadTechnicianId(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
               >
-                <option value="">-- اختر الفني المسؤول --</option>
+                <option value="">-- اختار الفني المسؤول --</option>
                 {allProfiles.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.full_name} ({p.job_title || p.role})
@@ -396,7 +396,7 @@ export const CreateMaintenanceModal: React.FC<CreateMaintenanceModalProps> = ({
               type="text"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="مثال: التنسيق مع مركز التحكم الإقليمي قبل بدء المناورة وفصل القاطع"
+              placeholder="اكتب تعليمات التنسيق مع مركز التحكم الإقليمي قبل بدء المناورة وفصل القاطع..."
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
             />
           </div>

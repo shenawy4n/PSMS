@@ -432,7 +432,7 @@ export const MaintenanceView: React.FC = () => {
                 type="text"
                 value={orderSearch}
                 onChange={(e) => setOrderSearch(e.target.value)}
-                placeholder="بحث برقم الأمر، العنوان، أو المحطة..."
+                placeholder="دور برقم الأمر، العنوان، أو اسم المحطة..."
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl pr-9 pl-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
               />
             </div>
@@ -494,9 +494,13 @@ export const MaintenanceView: React.FC = () => {
           {filteredOrders.length === 0 ? (
             <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-xl space-y-3">
               <Wrench className="w-10 h-10 text-slate-600 mx-auto" />
-              <h3 className="text-sm font-semibold text-slate-300">لا توجد أوامر صيانة مطابقة</h3>
+              <h3 className="text-sm font-semibold text-slate-300">
+                {maintenanceOrders.length === 0 ? 'مفيش أوامر صيانة مسجلة حالياً.' : 'مفيش أوامر صيانة مطابقة لبحثك.'}
+              </h3>
               <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                لم يتم العثور على أوامر صيانة تطابق محددات البحث الحالية. يمكنك تعديل الفلاتر أو إصدار أمر جديد.
+                {maintenanceOrders.length === 0
+                  ? 'تقدر تبدأ بتسجيل أول أمر صيانة للمحطة من خلال الزر بالأسفل.'
+                  : 'جرب تغير الفلاتر أو كلمة البحث لإظهار النتائج المطلوبة.'}
               </p>
               <Button size="sm" variant="outline" onClick={() => setIsCreateOrderOpen(true)}>
                 إصدار أمر صيانة جديد
@@ -523,7 +527,7 @@ export const MaintenanceView: React.FC = () => {
                       )}
                     </div>
                     <div className="text-xs text-slate-400 font-mono">
-                      الفترة المجدولة: {new Date(order.scheduled_start).toLocaleDateString('ar-SA')} - {new Date(order.scheduled_end).toLocaleDateString('ar-SA')}
+                      الفترة المجدولة: {new Date(order.scheduled_start).toLocaleDateString('ar-EG')} - {new Date(order.scheduled_end).toLocaleDateString('ar-EG')}
                     </div>
                   </div>
 
@@ -617,36 +621,45 @@ export const MaintenanceView: React.FC = () => {
             </Button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {preventiveOrders.map((order) => {
-              const startDate = new Date(order.scheduled_start);
-              const isPast = startDate < new Date();
-              return (
-                <div key={order.id} className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">
-                      {order.order_code}
-                    </span>
-                    <span className="text-xs text-slate-400 font-mono">
-                      تاريخ البدء: {startDate.toLocaleDateString('ar-SA')}
-                    </span>
-                  </div>
+          {preventiveOrders.length === 0 ? (
+            <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-xl space-y-3">
+              <Calendar className="w-10 h-10 text-slate-600 mx-auto" />
+              <h3 className="text-sm font-semibold text-slate-300">مفيش أوامر صيانة وقائية مجدولة حالياً.</h3>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                تقدر تجدول أعمال الصيانة الدورية للمحولات والقواطع بالضغط على زر "جدولة صيانة وقائية جديدة".
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {preventiveOrders.map((order) => {
+                const startDate = new Date(order.scheduled_start);
+                return (
+                  <div key={order.id} className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">
+                        {order.order_code}
+                      </span>
+                      <span className="text-xs text-slate-400 font-mono">
+                        تاريخ البدء: {startDate.toLocaleDateString('ar-EG')}
+                      </span>
+                    </div>
 
-                  <div>
-                    <h4 className="text-sm font-bold text-white">{order.title}</h4>
-                    <p className="text-xs text-slate-400 mt-1">{order.scope_of_work}</p>
-                  </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-white">{order.title}</h4>
+                      <p className="text-xs text-slate-400 mt-1">{order.scope_of_work}</p>
+                    </div>
 
-                  <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800/60 font-mono">
-                    <span>المحطة: {order.station_name}</span>
-                    <span className={order.status === 'completed' ? 'text-emerald-400' : 'text-amber-400'}>
-                      الحالة: {order.status}
-                    </span>
+                    <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800/60 font-mono">
+                      <span>المحطة: {order.station_name}</span>
+                      <span className={order.status === 'completed' ? 'text-emerald-400' : 'text-amber-400'}>
+                        الحالة: {order.status}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -660,7 +673,7 @@ export const MaintenanceView: React.FC = () => {
                 type="text"
                 value={ptwSearch}
                 onChange={(e) => setPtwSearch(e.target.value)}
-                placeholder="بحث برقم التصريح أو موضوع العمل..."
+                placeholder="دور برقم التصريح أو تفاصيل العمل..."
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl pr-9 pl-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -697,9 +710,13 @@ export const MaintenanceView: React.FC = () => {
           {filteredPTWs.length === 0 ? (
             <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-xl space-y-3">
               <ShieldAlert className="w-10 h-10 text-slate-600 mx-auto" />
-              <h3 className="text-sm font-semibold text-slate-300">لا توجد تصاريح سلامة مسجلة</h3>
+              <h3 className="text-sm font-semibold text-slate-300">
+                {permitsToWork.length === 0 ? 'مفيش تصاريح عمل وسلامة مسجلة حالياً.' : 'مفيش تصاريح عمل مطابقة لبحثك.'}
+              </h3>
               <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                لم يتم العثور على تصاريح عمل توافق البحث. اضغط على الزر أعلاه لإصدار تصريح عمل وعزل جهد جديد.
+                {permitsToWork.length === 0
+                  ? 'اضغط على زر "إصدار تصريح عمل" لإصدار تصريح عزل وتأريض جديد.'
+                  : 'جرب تغير شروط البحث لعرض تصاريح أخرى.'}
               </p>
             </div>
           ) : (
@@ -724,7 +741,7 @@ export const MaintenanceView: React.FC = () => {
                       )}
                     </div>
                     <div className="text-xs text-slate-400 font-mono">
-                      فترة الصلاحية: {new Date(ptw.valid_from).toLocaleDateString('ar-SA')} إلى {new Date(ptw.valid_to).toLocaleDateString('ar-SA')}
+                      فترة الصلاحية: {new Date(ptw.valid_from).toLocaleDateString('ar-EG')} إلى {new Date(ptw.valid_to).toLocaleDateString('ar-EG')}
                     </div>
                   </div>
 
@@ -815,7 +832,7 @@ export const MaintenanceView: React.FC = () => {
                 type="text"
                 value={insulationSearch}
                 onChange={(e) => setInsulationSearch(e.target.value)}
-                placeholder="بحث برقم الفحص أو المحطة أو المعدة..."
+                placeholder="دور برقم الفحص أو المحطة أو المعدة..."
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl pr-9 pl-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500"
               />
             </div>
@@ -834,9 +851,13 @@ export const MaintenanceView: React.FC = () => {
           {filteredInsulationTests.length === 0 ? (
             <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-xl space-y-3">
               <Activity className="w-10 h-10 text-slate-600 mx-auto" />
-              <h3 className="text-sm font-semibold text-slate-300">لا توجد فحوصات عوازل مسجلة</h3>
+              <h3 className="text-sm font-semibold text-slate-300">
+                {insulationTests.length === 0 ? 'مفيش فحوصات عوازل مسجلة حتى الآن.' : 'مفيش فحوصات عوازل مطابقة لبحثك.'}
+              </h3>
               <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                سجل قياسات الميجر ومقاومة العزل أو جهد انهيار زيت المحولات بالضغط على الزر أعلاه.
+                {insulationTests.length === 0
+                  ? 'تقدر تسجل قياسات الميجر ومقاومة العزل أو جهد انهيار زيت المحولات بالضغط على الزر أعلاه.'
+                  : 'جرب تغير شروط البحث لعرض فحوصات أخرى.'}
               </p>
             </div>
           ) : (
@@ -851,7 +872,7 @@ export const MaintenanceView: React.FC = () => {
                       {getRatingBadge(test.status_rating)}
                     </div>
                     <span className="text-xs text-slate-400 font-mono">
-                      {new Date(test.test_date).toLocaleDateString('ar-SA')}
+                      {new Date(test.test_date).toLocaleDateString('ar-EG')}
                     </span>
                   </div>
 
@@ -926,14 +947,14 @@ export const MaintenanceView: React.FC = () => {
                 {maintenanceAuditLogs.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="p-6 text-center text-slate-500">
-                      لا توجد عمليات صيانة مسجلة في سجل التدقيق حالياً.
+                      مفيش عمليات مسجلة في سجل تدقيق الصيانة حتى الآن.
                     </td>
                   </tr>
                 ) : (
                   maintenanceAuditLogs.map((log) => (
                     <tr key={log.id} className="hover:bg-slate-850/50">
                       <td className="p-3 font-mono text-slate-400">
-                        {new Date(log.created_at).toLocaleString('ar-SA')}
+                        {new Date(log.created_at).toLocaleString('ar-EG')}
                       </td>
                       <td className="p-3 text-slate-200">
                         {log.actor_name || log.actor_email || 'النظام'}

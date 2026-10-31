@@ -58,7 +58,7 @@ export const AuditLogView: React.FC = () => {
           <Search className="absolute right-3 top-2.5 w-4 h-4 text-slate-500" />
           <input
             type="text"
-            placeholder="البحث بالعملية، هوية المنفذ، أو الكيان المتأثر..."
+            placeholder="دور بنوع العملية، اسم المنفذ، أو الكيان المتأثر..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pr-9 pl-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
@@ -80,27 +80,43 @@ export const AuditLogView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 font-mono text-slate-200">
-              {filteredLogs.map((log) => (
-                <tr key={log.id} className="hover:bg-slate-800/40 transition-colors">
-                  <td className="py-3.5 px-4 text-slate-300 whitespace-nowrap">
-                    {new Date(log.created_at).toLocaleString('ar-SA')}
-                  </td>
-                  <td className="py-3.5 px-4 font-sans whitespace-nowrap">
-                    <p className="font-medium text-white">{log.actor_name || 'النظام'}</p>
-                    <p className="text-[11px] text-slate-500 font-mono">{log.actor_email || '-'}</p>
-                  </td>
-                  <td className="py-3.5 px-4 whitespace-nowrap">
-                    <span className="px-2 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-800 font-semibold text-[11px]">
-                      {log.action}
-                    </span>
-                  </td>
-                  <td className="py-3.5 px-4 text-slate-300 whitespace-nowrap">{log.entity_type}</td>
-                  <td className="py-3.5 px-4 text-slate-400 whitespace-nowrap">{log.entity_id}</td>
-                  <td className="py-3.5 px-4 max-w-xs truncate text-[11px] text-slate-400 font-mono">
-                    {log.new_data ? JSON.stringify(log.new_data) : '-'}
+              {filteredLogs.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-slate-400 font-sans">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <ShieldCheck className="w-8 h-8 text-slate-600" />
+                      <p className="text-sm font-semibold text-slate-300">
+                        {searchTerm ? 'مفيش نتائج مطابقة لبحثك في سجل التدقيق.' : 'مفيش عمليات مسجلة في سجل التدقيق الأمني حتى الآن.'}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {searchTerm ? 'جرب البحث بكلمة تانية أو امسح الفلتر.' : 'بيتم توثيق العمليات الحساسة وتعديل الصلاحيات تلقائياً هنا.'}
+                      </p>
+                    </div>
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filteredLogs.map((log) => (
+                  <tr key={log.id} className="hover:bg-slate-800/40 transition-colors">
+                    <td className="py-3.5 px-4 text-slate-300 whitespace-nowrap">
+                      {new Date(log.created_at).toLocaleString('ar-EG')}
+                    </td>
+                    <td className="py-3.5 px-4 font-sans whitespace-nowrap">
+                      <p className="font-medium text-white">{log.actor_name || 'النظام'}</p>
+                      <p className="text-[11px] text-slate-500 font-mono">{log.actor_email || '-'}</p>
+                    </td>
+                    <td className="py-3.5 px-4 whitespace-nowrap">
+                      <span className="px-2 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-800 font-semibold text-[11px]">
+                        {log.action}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-4 text-slate-300 whitespace-nowrap">{log.entity_type}</td>
+                    <td className="py-3.5 px-4 text-slate-400 whitespace-nowrap">{log.entity_id}</td>
+                    <td className="py-3.5 px-4 max-w-xs truncate text-[11px] text-slate-400 font-mono">
+                      {log.new_data ? JSON.stringify(log.new_data) : '-'}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

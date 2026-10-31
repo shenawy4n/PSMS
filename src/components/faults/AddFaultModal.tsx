@@ -157,7 +157,7 @@ export const AddFaultModal: React.FC<AddFaultModalProps> = ({
 
         <Input
           label="عنوان البلاغ"
-          placeholder="مثال: تسرب زيت خفيف عند صمام محول التوزيع الثاني"
+          placeholder="اكتب وصف مختصر للعطل (مثال: تسريب زيت خفيف عند صمام محول الربط)"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           error={errors.title}
@@ -186,7 +186,7 @@ export const AddFaultModal: React.FC<AddFaultModalProps> = ({
             className={`w-full px-3 py-2 text-xs bg-slate-950 border rounded-lg text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 ${
               errors.description ? 'border-rose-500' : 'border-slate-800'
             }`}
-            placeholder="يرجى توضيح وقت الملاحظة، إشارات الحماية، والقراءات المصاحبة..."
+            placeholder="اشرح العطل بالتفصيل وإشارات الوقاية والقراءات المصاحبة..."
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />

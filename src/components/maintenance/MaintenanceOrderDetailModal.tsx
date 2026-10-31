@@ -143,7 +143,7 @@ export const MaintenanceOrderDetailModal: React.FC<MaintenanceOrderDetailModalPr
             </div>
 
             <div className="text-xs text-slate-400 font-mono">
-              تاريخ الإنشاء: {new Date(order.created_at).toLocaleDateString('ar-SA')}
+              تاريخ الإنشاء: {new Date(order.created_at).toLocaleDateString('ar-EG')}
             </div>
           </div>
 
@@ -170,15 +170,15 @@ export const MaintenanceOrderDetailModal: React.FC<MaintenanceOrderDetailModalPr
             <div className="p-3 bg-slate-950/40 border border-slate-800/80 rounded-xl space-y-1">
               <span className="text-slate-400">الفترة المجدولة:</span>
               <p className="text-slate-200 font-mono">
-                {new Date(order.scheduled_start).toLocaleDateString('ar-SA')} - {new Date(order.scheduled_end).toLocaleDateString('ar-SA')}
+                {new Date(order.scheduled_start).toLocaleDateString('ar-EG')} - {new Date(order.scheduled_end).toLocaleDateString('ar-EG')}
               </p>
             </div>
 
             <div className="p-3 bg-slate-950/40 border border-slate-800/80 rounded-xl space-y-1">
               <span className="text-slate-400">الفترة الفعلية للتنفيذ:</span>
               <p className="text-slate-200 font-mono">
-                {order.actual_start ? new Date(order.actual_start).toLocaleDateString('ar-SA') : 'لم يبدأ بعد'}
-                {order.actual_end ? ` إلى ${new Date(order.actual_end).toLocaleDateString('ar-SA')}` : ''}
+                {order.actual_start ? new Date(order.actual_start).toLocaleDateString('ar-EG') : 'لم يبدأ بعد'}
+                {order.actual_end ? ` إلى ${new Date(order.actual_end).toLocaleDateString('ar-EG')}` : ''}
               </p>
             </div>
           </div>

@@ -238,14 +238,13 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
             lead_technician_name: allProfiles?.find((p) => p.id === o.lead_technician_id)?.full_name || o.lead_technician_name || 'فني الصيانة',
           }))
         );
-      } else if (dbOrders && dbOrders.length === 0) {
-        // If Supabase table is empty, load demo seed to maintain realistic visibility
-        setMaintenanceOrders(INITIAL_MAINTENANCE);
+      } else {
+        setMaintenanceOrders([]);
       }
 
       // 7. Fetch permits to work (PTW)
       try {
-        const { data: dbPtws, error: ptwErr } = await client
+        const { data: dbPtws } = await client
           .from('permits_to_work')
           .select('*')
           .order('created_at', { ascending: false });
@@ -260,16 +259,16 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
               approver_name: allProfiles?.find((u) => u.id === p.approved_by)?.full_name || p.approver_name,
             }))
           );
-        } else if (ptwErr || (dbPtws && dbPtws.length === 0)) {
-          setPermitsToWork(INITIAL_PTWS);
+        } else {
+          setPermitsToWork([]);
         }
       } catch {
-        setPermitsToWork(INITIAL_PTWS);
+        setPermitsToWork([]);
       }
 
       // 8. Fetch insulation and diagnostic tests
       try {
-        const { data: dbTests, error: testErr } = await client
+        const { data: dbTests } = await client
           .from('insulation_tests')
           .select('*')
           .order('test_date', { ascending: false });
@@ -283,11 +282,11 @@ export const StationProvider: React.FC<{ children: React.ReactNode }> = ({ child
               tester_name: allProfiles?.find((u) => u.id === t.tested_by)?.full_name || t.tester_name,
             }))
           );
-        } else if (testErr || (dbTests && dbTests.length === 0)) {
-          setInsulationTests(INITIAL_INSULATION_TESTS);
+        } else {
+          setInsulationTests([]);
         }
       } catch {
-        setInsulationTests(INITIAL_INSULATION_TESTS);
+        setInsulationTests([]);
       }
 
       // 9. Fetch audit logs
