@@ -102,7 +102,15 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
     try {
       if (isEditing && initialProfile) {
-        const res = await updateEmployeeProfile(initialProfile.id, result.data);
+        const { full_name, phone, role: updatedRole, department, job_title, is_active } = result.data;
+        const res = await updateEmployeeProfile(initialProfile.id, {
+          full_name,
+          phone,
+          role: updatedRole,
+          department,
+          job_title,
+          is_active,
+        });
         if (!res.success) {
           setServerError(res.error || 'تعذر تحديث بيانات الموظف');
           setIsSubmitting(false);
@@ -116,7 +124,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
           organization_name: currentUser?.organization_name,
         });
         if (!res.success) {
-          const errMessage = res.error || 'تعذر إضافة الموظف الجديد';
+          let errMessage = res.error || 'تعذر إضافة الموظف الجديد';
+          if (res.rollbackPerformed) {
+            errMessage = `${errMessage} (تم التراجع عن حساب المصادقة بأمان لمنع أي حسابات معلقة).`;
+          }
           setServerError(errMessage);
           if (errMessage.includes('الرقم الوظيفي')) {
             setErrors((prev) => ({ ...prev, employee_number: errMessage }));
@@ -127,7 +138,19 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
           setIsSubmitting(false);
           return;
         }
-        showToast('success', 'تم إنشاء ملف الموظف الجديد بنجاح.');
+
+        // Distinct feedback based on invitation delivery
+        if (res.inviteDelivered) {
+          showToast(
+            'success',
+            res.message || 'تم إنشاء حساب الموظف وإرسال رابط الدعوة بالبريد الإلكتروني بنجاح.'
+          );
+        } else {
+          showToast(
+            'info',
+            res.message || 'تم إنشاء حساب الموظف وملفه الوظيفي بنجاح (لم يتم تسليم بريد الدعوة، يمكن للموظف تفعيل حسابه عبر رابط استعادة كلمة المرور).'
+          );
+        }
       }
 
       setIsSubmitting(false);

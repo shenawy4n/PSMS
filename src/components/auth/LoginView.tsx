@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Zap, ShieldCheck, Lock, Mail, ArrowLeft, UserCheck, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { isSupabaseConfigured } from '../../lib/supabase';
+import { isSupabaseConfigured, isDemoModeAllowed } from '../../lib/supabase';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
@@ -21,6 +21,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess }) => {
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
 
   const isSupabase = isSupabaseConfigured();
+  const demoAllowed = isDemoModeAllowed();
 
   const handleRetryConnection = async () => {
     setRetryingConn(true);
@@ -184,74 +185,76 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess }) => {
             onClose={() => setIsForgotPasswordOpen(false)}
           />
 
-          {/* Collapsible Demo Mode for offline testing */}
-          <div className="pt-4 border-t border-slate-800">
-            {isSupabase ? (
-              <div className="space-y-3">
-                <button
-                  type="button"
-                  onClick={() => setShowDemoOptions(!showDemoOptions)}
-                  className="w-full flex items-center justify-between text-xs text-slate-400 hover:text-slate-200 transition-colors py-1 cursor-pointer"
-                >
-                  <span className="flex items-center gap-1.5 font-medium">
-                    <UserCheck className="w-3.5 h-3.5 text-amber-400" />
-                    استعراض الواجهات بالوضع التجريبي المحلي (بيانات تجريبية)
-                  </span>
-                  {showDemoOptions ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
+          {/* Collapsible Demo Mode for offline testing ONLY when demo mode is explicitly enabled */}
+          {demoAllowed && (
+            <div className="pt-4 border-t border-slate-800">
+              {isSupabase ? (
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowDemoOptions(!showDemoOptions)}
+                    className="w-full flex items-center justify-between text-xs text-slate-400 hover:text-slate-200 transition-colors py-1 cursor-pointer"
+                  >
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <UserCheck className="w-3.5 h-3.5 text-amber-400" />
+                      استعراض الواجهات بالوضع التجريبي المحلي (بيانات تجريبية)
+                    </span>
+                    {showDemoOptions ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </button>
 
-                {showDemoOptions && (
-                  <div className="p-3 bg-slate-950/80 rounded-lg border border-amber-900/40 space-y-2.5 animate-in fade-in">
-                    <p className="text-[11px] text-amber-300/90 leading-relaxed">
-                      ⚠️ <strong className="font-semibold">تنبيه أمني:</strong> الوضع التجريبي معزول ولا يملك أي صلاحيات على قاعدة بيانات Supabase. لاختبار صلاحيات السوبر أدمن الحقيقية، سجّل الدخول بحسابك الموثق أعلاه.
-                    </p>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      {allProfiles.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => handleDemoSelect(p.id)}
-                          className="p-2 text-right rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/40 transition-colors cursor-pointer"
-                        >
-                          <p className="font-semibold text-slate-200 truncate">{p.full_name}</p>
-                          <p className="text-[10px] text-amber-400 font-mono">
-                            {p.role === 'super_admin' ? 'مدير عام تجريبي' : p.role === 'admin' ? 'مدير قطاع تجريبي' : 'فني تجريبي'}
-                          </p>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                <p className="text-xs font-semibold text-slate-300 text-right">
-                  الدخول السريع بهوية تجريبية (لاختبار الصلاحيات محلياً):
-                </p>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  {allProfiles.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => handleDemoSelect(p.id)}
-                      className="p-2.5 text-right rounded-lg bg-slate-950 hover:bg-slate-800/80 border border-slate-800 hover:border-blue-500/50 transition-colors cursor-pointer"
-                    >
-                      <p className="font-semibold text-slate-200 truncate">{p.full_name}</p>
-                      <p className="text-[11px] text-blue-400 font-mono">
-                        {p.role === 'super_admin'
-                          ? 'مدير عام'
-                          : p.role === 'admin'
-                          ? 'مدير قطاع'
-                          : p.role === 'supervisor'
-                          ? 'مشرف محطة'
-                          : 'فني تشغيل'}
+                  {showDemoOptions && (
+                    <div className="p-3 bg-slate-950/80 rounded-lg border border-amber-900/40 space-y-2.5 animate-in fade-in">
+                      <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                        ⚠️ <strong className="font-semibold">تنبيه أمني:</strong> الوضع التجريبي معزول ولا يملك أي صلاحيات على قاعدة بيانات Supabase. لاختبار صلاحيات السوبر أدمن الحقيقية، سجّل الدخول بحسابك الموثق أعلاه.
                       </p>
-                    </button>
-                  ))}
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        {allProfiles.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => handleDemoSelect(p.id)}
+                            className="p-2 text-right rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/40 transition-colors cursor-pointer"
+                          >
+                            <p className="font-semibold text-slate-200 truncate">{p.full_name}</p>
+                            <p className="text-[10px] text-amber-400 font-mono">
+                              {p.role === 'super_admin' ? 'مدير عام تجريبي' : p.role === 'admin' ? 'مدير قطاع تجريبي' : 'فني تجريبي'}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
-          </div>
+              ) : (
+                <div className="space-y-2.5">
+                  <p className="text-xs font-semibold text-slate-300 text-right">
+                    الدخول السريع بهوية تجريبية (لاختبار الصلاحيات محلياً):
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    {allProfiles.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => handleDemoSelect(p.id)}
+                        className="p-2.5 text-right rounded-lg bg-slate-950 hover:bg-slate-800/80 border border-slate-800 hover:border-blue-500/50 transition-colors cursor-pointer"
+                      >
+                        <p className="font-semibold text-slate-200 truncate">{p.full_name}</p>
+                        <p className="text-[11px] text-blue-400 font-mono">
+                          {p.role === 'super_admin'
+                            ? 'مدير عام'
+                            : p.role === 'admin'
+                            ? 'مدير قطاع'
+                            : p.role === 'supervisor'
+                            ? 'مشرف محطة'
+                            : 'فني تشغيل'}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Security Notice */}

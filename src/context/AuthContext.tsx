@@ -8,6 +8,7 @@ import { UserProfile, UserRole } from '../types/database';
 import { INITIAL_PROFILES } from '../data/initialData';
 import {
   isSupabaseConfigured,
+  isDemoModeAllowed,
   getSupabase,
   testSupabaseConnection,
   SupabaseConnectionStatus,
@@ -37,6 +38,15 @@ function generateUUID(): string {
   });
 }
 
+export interface CreateEmployeeResult {
+  success: boolean;
+  error?: string;
+  profile?: UserProfile;
+  message?: string;
+  inviteDelivered?: boolean;
+  rollbackPerformed?: boolean;
+}
+
 interface AuthContextType {
   currentUser: UserProfile | null;
   role: UserRole;
@@ -61,7 +71,7 @@ interface AuthContextType {
   changePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
   resetPasswordForEmail: (email: string) => Promise<{ success: boolean; message: string; error?: string }>;
   completePasswordReset: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
-  createEmployeeProfile: (newProfile: Omit<UserProfile, 'id' | 'created_at'> & { id?: string }) => Promise<{ success: boolean; error?: string; profile?: UserProfile }>;
+  createEmployeeProfile: (newProfile: Omit<UserProfile, 'id' | 'created_at'> & { id?: string }) => Promise<CreateEmployeeResult>;
   updateEmployeeProfile: (userId: string, updates: Partial<UserProfile>) => Promise<{ success: boolean; error?: string }>;
   toggleEmployeeActiveStatus: (userId: string) => Promise<{ success: boolean; error?: string }>;
   refreshProfiles: () => Promise<void>;
@@ -356,6 +366,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Demo Mode management
   const startDemoMode = (personaId?: string) => {
+    if (!isDemoModeAllowed()) {
+      console.warn('Demo Mode is strictly disabled in production builds.');
+      return;
+    }
     const targetPersona = personaId
       ? INITIAL_PROFILES.find((p) => p.id === personaId) || INITIAL_PROFILES[0]
       : INITIAL_PROFILES[0];
@@ -373,7 +387,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // In Local/Demo Mode only: allow switching persona for verification.
   // In Production Supabase Mode: persona switcher is restricted so users cannot spoof DB roles!
   const switchUserRole = (newRole: UserRole) => {
-    if (isSupabaseMode && !isDemoMode) {
+    if (!isDemoModeAllowed() || (isSupabaseMode && !isDemoMode)) {
       console.warn('Role switching is disabled when live Supabase Auth is active. Role is governed strictly by PostgreSQL RLS.');
       return;
     }
@@ -386,7 +400,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const selectUserPersona = (userId: string) => {
-    if (isSupabaseMode && !isDemoMode) {
+    if (!isDemoModeAllowed() || (isSupabaseMode && !isDemoMode)) {
       console.warn('Persona switching is restricted in live Supabase mode.');
       return;
     }
@@ -502,16 +516,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    // Local / Demonstration mode matching
-    const found = profiles.find((p) => p.email.toLowerCase() === email.toLowerCase());
-    if (found) {
-      setCurrentUser(found);
-      setIsDemoMode(true);
-      setSessionStatus('demo_mode');
-      return { success: true };
+    // Local / Demonstration mode matching (strictly restricted if demo mode is not allowed)
+    if (isDemoModeAllowed()) {
+      const found = profiles.find((p) => p.email.toLowerCase() === email.toLowerCase());
+      if (found) {
+        setCurrentUser(found);
+        setIsDemoMode(true);
+        setSessionStatus('demo_mode');
+        return { success: true };
+      }
     }
     setSessionStatus('unauthenticated');
-    return { success: false, error: 'البريد الإلكتروني غير مسجل في قاعدة البيانات' };
+    return { success: false, error: 'بيانات الدخول غير صحيحة. يرجى التحقق من البريد الإلكتروني وكلمة المرور.' };
   };
 
   const signOut = async () => {
@@ -733,7 +749,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const createEmployeeProfile = async (
     newProfile: Omit<UserProfile, 'id' | 'created_at'> & { id?: string }
-  ): Promise<{ success: boolean; error?: string; profile?: UserProfile }> => {
+  ): Promise<CreateEmployeeResult> => {
     // 1. Authorization check: only super_admin and admin can create employees
     if (!canCreateEmployee(role)) {
       return { success: false, error: 'ليس لديك الصلاحية لإنشاء موظفين في المنظومة.' };
@@ -781,7 +797,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
 
       setProfiles((prev) => [created, ...prev]);
-      return { success: true, profile: created };
+      return {
+        success: true,
+        profile: created,
+        message: 'تم إنشاء ملف الموظف في البيئة التجريبية بنجاح.',
+        inviteDelivered: true,
+      };
     }
 
     // 4. Live Supabase Mode: Server-Side Provisioning via Edge Function
@@ -812,12 +833,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const createdProfile: UserProfile = data.profile;
         setProfiles((prev) => [createdProfile, ...prev.filter((p) => p.id !== createdProfile.id)]);
         await refreshProfiles();
-        return { success: true, profile: createdProfile };
+        return {
+          success: true,
+          profile: createdProfile,
+          message: data.message,
+          inviteDelivered: data.invite_delivered ?? (data.message?.includes('إرسال دعوة') || false),
+        };
       }
 
       // If Edge Function returned an explicit error response
       if (data && !data.success && data.error) {
-        return { success: false, error: data.error };
+        return {
+          success: false,
+          error: data.error,
+          rollbackPerformed: data.rollback_performed ?? Boolean(data.error?.includes('قاعدة البيانات')),
+        };
       }
 
       if (fnError) {
@@ -843,23 +873,71 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     userId: string,
     updates: Partial<UserProfile>
   ): Promise<{ success: boolean; error?: string }> => {
-    if (isSupabaseMode) {
-      const client = getSupabase();
-      if (client) {
-        try {
-          const { error } = await client
-            .from('profiles')
-            .update({ ...updates, updated_at: new Date().toISOString() })
-            .eq('id', userId);
+    // 1. Authorization checks
+    if (!currentUser) {
+      return { success: false, error: 'يجب تسجيل الدخول لتعديل البيانات.' };
+    }
 
-          if (error) {
-            const formatted = formatArabicError(error);
-            return { success: false, error: formatted.message };
-          }
-        } catch (err) {
-          const formatted = formatArabicError(err);
+    const isSelf = currentUser.id === userId;
+    const isSuper = role === 'super_admin';
+    const isAdmin = role === 'admin';
+
+    // Non-admins cannot update other employees
+    if (!isSelf && !isSuper && !isAdmin) {
+      return { success: false, error: 'ليس لديك الصلاحية لتعديل بيانات الموظفين الآخرين.' };
+    }
+
+    // Role escalation prevention: Admin cannot promote anyone to super_admin
+    if (updates.role && !canManageRoles(role, updates.role)) {
+      return { success: false, error: 'ليس لديك الصلاحية لمنح هذه الرتبة (لا يمكن ترقية أو تعديل مدير نظام عام).' };
+    }
+
+    // Self-update security: cannot change own role, active status, or organization
+    if (isSelf && !isSuper) {
+      if (updates.role && updates.role !== currentUser.role) {
+        return { success: false, error: 'غير مصرح بتعديل رتبتك أو صلاحياتك بنفسك.' };
+      }
+      if (updates.is_active !== undefined && updates.is_active !== currentUser.is_active) {
+        return { success: false, error: 'غير مصرح بتعديل حالة تفعيل حسابك بنفسك.' };
+      }
+      if (updates.organization_id && updates.organization_id !== currentUser.organization_id) {
+        return { success: false, error: 'غير مصرح بتعديل تبعية المؤسسة لحسابك.' };
+      }
+    }
+
+    // 2. Sanitize database payload: filter strictly to actual mutable columns of public.profiles
+    // Strips out non-column keys (assigned_station_ids, etc.) and immutable columns (id, email, employee_number)
+    const dbPayload: Record<string, any> = {
+      updated_at: new Date().toISOString(),
+    };
+    if (updates.full_name !== undefined) dbPayload.full_name = updates.full_name.trim();
+    if (updates.phone !== undefined) dbPayload.phone = updates.phone ? updates.phone.trim() : null;
+    if (updates.department !== undefined) dbPayload.department = updates.department ? updates.department.trim() : null;
+    if (updates.job_title !== undefined) dbPayload.job_title = updates.job_title ? updates.job_title.trim() : null;
+    if (updates.role !== undefined && (isSuper || isAdmin)) dbPayload.role = updates.role;
+    if (updates.is_active !== undefined && (isSuper || isAdmin)) dbPayload.is_active = updates.is_active;
+    if (updates.supervisor_id !== undefined && (isSuper || isAdmin)) dbPayload.supervisor_id = updates.supervisor_id;
+    if (updates.organization_id !== undefined && isSuper) dbPayload.organization_id = updates.organization_id;
+
+    if (isSupabaseMode && !isDemoMode) {
+      const client = getSupabase();
+      if (!client) {
+        return { success: false, error: 'تعذر الاتصال بـ Supabase.' };
+      }
+
+      try {
+        const { error } = await client
+          .from('profiles')
+          .update(dbPayload)
+          .eq('id', userId);
+
+        if (error) {
+          const formatted = formatArabicError(error);
           return { success: false, error: formatted.message };
         }
+      } catch (err) {
+        const formatted = formatArabicError(err);
+        return { success: false, error: formatted.message };
       }
     }
 
@@ -875,8 +953,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const toggleEmployeeActiveStatus = async (
     userId: string
   ): Promise<{ success: boolean; error?: string }> => {
+    if (currentUser?.id === userId) {
+      return { success: false, error: 'غير مسموح للمستخدم بتعطيل حسابه الشخصي.' };
+    }
+    if (role !== 'super_admin' && role !== 'admin') {
+      return { success: false, error: 'ليس لديك الصلاحية لتعديل حالة تفعيل حسابات الموظفين.' };
+    }
     const target = profiles.find((p) => p.id === userId);
     if (!target) return { success: false, error: 'الموظف غير موجود' };
+
+    if (target.role === 'super_admin' && role !== 'super_admin') {
+      return { success: false, error: 'لا يمكن لمدير القطاع تعديل حالة حساب مدير النظام العام.' };
+    }
 
     const newStatus = !target.is_active;
     return updateEmployeeProfile(userId, { is_active: newStatus });

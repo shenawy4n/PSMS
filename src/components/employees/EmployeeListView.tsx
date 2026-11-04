@@ -24,6 +24,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useStations } from '../../context/StationContext';
 import { UserRole, UserProfile } from '../../types/database';
 import { getRoleArabicLabel, canManageRoles, canCreateEmployee as canCreateEmployeePermission } from '../../lib/permissions';
+import { isDemoModeAllowed } from '../../lib/supabase';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { EmployeeFormModal } from './EmployeeFormModal';
@@ -35,6 +36,7 @@ interface EmployeeListViewProps {
 export const EmployeeListView: React.FC<EmployeeListViewProps> = ({ onOpenAssignModal }) => {
   const { allProfiles, currentUser, role, selectUserPersona, toggleEmployeeActiveStatus, refreshProfiles, isSupabaseMode } = useAuth();
   const { stations, showToast } = useStations();
+  const demoAllowed = isDemoModeAllowed();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRoleFilter, setSelectedRoleFilter] = useState<string>('all');
@@ -291,7 +293,7 @@ export const EmployeeListView: React.FC<EmployeeListViewProps> = ({ onOpenAssign
                   )}
                 </div>
 
-                {!isCurrentUser && !isSupabaseMode && (
+                {!isCurrentUser && demoAllowed && !isSupabaseMode && (
                   <button
                     onClick={() => selectUserPersona(emp.id)}
                     className="text-xs text-blue-400 hover:text-blue-300 font-medium cursor-pointer"

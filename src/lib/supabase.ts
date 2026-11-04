@@ -54,6 +54,34 @@ export function isSupabaseConfigured(): boolean {
 }
 
 /**
+ * Determines whether Demo Mode is allowed.
+ * Production Security Rule:
+ * - Production builds (import.meta.env.PROD) must NOT expose Demo Mode or simulated personas
+ *   unless explicitly permitted via VITE_ENABLE_DEMO_MODE === 'true'.
+ * - Local development (import.meta.env.DEV) allows Demo Mode for isolated UI prototyping.
+ */
+export function isDemoModeAllowed(): boolean {
+  if (memoryStorage.has('psms_enable_demo_mode')) {
+    return memoryStorage.get('psms_enable_demo_mode') === 'true';
+  }
+  if (import.meta.env.VITE_ENABLE_DEMO_MODE === 'true') {
+    return true;
+  }
+  return Boolean(import.meta.env.DEV);
+}
+
+/**
+ * Test utility to simulate production or development demo mode setting in isolated unit tests.
+ */
+export function setDemoModeAllowedForTesting(allowed: boolean | null): void {
+  if (allowed === null) {
+    memoryStorage.delete('psms_enable_demo_mode');
+  } else {
+    memoryStorage.set('psms_enable_demo_mode', String(allowed));
+  }
+}
+
+/**
  * Validates Supabase project URL format
  */
 export function validateSupabaseUrl(url: string): { isValid: boolean; error?: string } {
