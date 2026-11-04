@@ -128,7 +128,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
           if (res.rollbackPerformed) {
             errMessage = `${errMessage} (تم التراجع عن حساب المصادقة بأمان لمنع أي حسابات معلقة).`;
           } else if (res.rollbackFailed) {
-            errMessage = `${errMessage} (تنبيه: فشل التراجع التلقائي عن حساب المصادقة؛ يُرجى مراجعة مسؤول المنظومة).`;
+            errMessage = `${errMessage} (تنبيه أمني: تعذر إتمام التراجع التلقائي، قد يتطلب الأمر مراجعة المسؤول لإزالة الحساب المعلق).`;
           }
           setServerError(errMessage);
           if (errMessage.includes('الرقم الوظيفي')) {
@@ -150,7 +150,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         } else {
           showToast(
             'info',
-            res.message || 'تم إنشاء حساب الموظف وملفه الوظيفي بنجاح (لم يتم تسليم بريد الدعوة، يمكن للموظف تفعيل حسابه عبر رابط استعادة كلمة المرور).'
+            res.message || 'تم إنشاء حساب الموظف وملفه الوظيفي بنجاح (لم يتم تسليم بريد الدعوة، يمكن للموظف إعداد كلمة المرور عبر رابط استعادة كلمة المرور).'
           );
         }
       }

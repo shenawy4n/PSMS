@@ -190,7 +190,11 @@ export const EmployeeListView: React.FC<EmployeeListViewProps> = ({ onOpenAssign
           const assignedCount = emp.assigned_station_ids?.length || 0;
           const canEditThisProfile =
             role === 'super_admin' ||
-            (role === 'admin' && emp.role !== 'super_admin');
+            (role === 'admin' &&
+              emp.role !== 'super_admin' &&
+              Boolean(currentUser?.organization_id) &&
+              Boolean(emp.organization_id) &&
+              currentUser?.organization_id === emp.organization_id);
 
           return (
             <div

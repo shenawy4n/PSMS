@@ -52,7 +52,6 @@ export interface CreateEmployeeResult {
   inviteDelivered?: boolean;
   rollbackPerformed?: boolean;
   rollbackFailed?: boolean;
-  rollbackErrorDetail?: string;
 }
 
 interface AuthContextType {
@@ -856,7 +855,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           error: data.error,
           rollbackPerformed: data.rollback_performed === true,
           rollbackFailed: data.rollback_failed === true,
-          rollbackErrorDetail: data.rollback_error_detail,
         };
       }
 
@@ -888,18 +886,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, error: 'يجب تسجيل الدخول لتعديل البيانات.' };
     }
 
+    const isSelf = currentUser.id === userId;
     const targetProfile = profiles.find((p) => p.id === userId);
+    if (!isSelf && !targetProfile) {
+      return { success: false, error: 'الموظف غير موجود' };
+    }
+
+    const targetRole = isSelf ? currentUser.role : targetProfile?.role;
     const authCheck = canUpdateEmployeeProfile(
       role,
       currentUser.id,
       userId,
-      {
-        role: updates.role,
-        is_active: updates.is_active,
-        organization_id: updates.organization_id,
-      },
+      updates,
       currentUser.organization_id,
-      targetProfile?.organization_id
+      targetProfile?.organization_id,
+      targetRole
     );
 
     if (!authCheck.allowed) {

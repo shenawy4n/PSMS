@@ -358,18 +358,16 @@ Deno.serve(async (req: Request) => {
           if (deleteError) {
             rollbackFailed = true;
             rollbackPerformed = false;
-            rollbackErrorDetail = deleteError.message;
-            console.error('Rollback auth user deletion failed:', deleteError);
+            console.error('[create-employee] Rollback auth user deletion failed (internal server log):', deleteError);
           } else {
             rollbackPerformed = true;
             rollbackFailed = false;
-            console.info(`Successfully rolled back newly created auth user: ${authUserId}`);
+            console.info(`[create-employee] Successfully rolled back newly created auth user: ${authUserId}`);
           }
         } catch (delEx: any) {
           rollbackFailed = true;
           rollbackPerformed = false;
-          rollbackErrorDetail = delEx?.message || 'Unknown rollback exception';
-          console.error('Rollback auth user deletion exception:', delEx);
+          console.error('[create-employee] Rollback auth user deletion exception (internal server log):', delEx);
         }
       }
 
@@ -389,13 +387,13 @@ Deno.serve(async (req: Request) => {
         clientErrorMessage = 'لا يمكن منح رتبة مدير نظام عام (Super Admin) إلا من خلال المشرف العام.';
       }
 
+      // Clean client contract: explicit booleans only, zero raw internal errors exposed
       return new Response(
         JSON.stringify({
           success: false,
           error: clientErrorMessage,
           rollback_performed: rollbackPerformed,
           rollback_failed: rollbackFailed,
-          rollback_error_detail: rollbackErrorDetail,
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -403,7 +401,7 @@ Deno.serve(async (req: Request) => {
 
     const successMessage = inviteDelivered
       ? 'تم إرسال دعوة البريد الإلكتروني وإنشاء حساب الموظف وتعيين المحطات بنجاح.'
-      : 'تم إنشاء حساب الموظف وملفه الوظيفي وتعيين المحطات بنجاح (جاهز لتسجيل الدخول).';
+      : 'تم إنشاء حساب الموظف وملفه الوظيفي وتعيين المحطات بنجاح (لم يتم تسليم بريد الدعوة، يمكن للموظف إعداد كلمة المرور عبر رابط استعادة كلمة المرور).';
 
     return new Response(
       JSON.stringify({

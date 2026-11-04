@@ -238,25 +238,21 @@ export function canUpdateEmployeeProfile(
   callerRole: UserRole,
   callerId: string,
   targetId: string,
-  updates: { role?: UserRole; is_active?: boolean; organization_id?: string | null },
+  updates: { role?: UserRole; is_active?: boolean; organization_id?: string | null; [key: string]: any },
   callerOrgId?: string | null,
-  targetOrgId?: string | null
+  targetOrgId?: string | null,
+  targetRole?: UserRole
 ): { allowed: boolean; error?: string } {
   const isSelf = callerId === targetId;
   const isSuper = callerRole === 'super_admin';
   const isAdmin = callerRole === 'admin';
 
-  // Non-admins cannot update other employees
+  // 1. Non-admins cannot update other employees
   if (!isSelf && !isSuper && !isAdmin) {
     return { allowed: false, error: 'ليس لديك الصلاحية لتعديل بيانات الموظفين الآخرين.' };
   }
 
-  // Admin cannot operate outside their organization
-  if (isAdmin && callerOrgId && targetOrgId && callerOrgId !== targetOrgId) {
-    return { allowed: false, error: 'غير مصرح لمدير القطاع بتعديل موظفين خارج قطاعه التشغيلي.' };
-  }
-
-  // Self-update security: cannot change own role, active status, or organization
+  // 2. Self-update security: cannot change own role, active status, or organization
   if (isSelf) {
     if (updates.role && updates.role !== callerRole) {
       return { allowed: false, error: 'غير مصرح بتعديل رتبتك أو صلاحياتك بنفسك.' };
@@ -269,7 +265,28 @@ export function canUpdateEmployeeProfile(
     }
   }
 
-  // Role escalation prevention for other employees
+  // 3. Operational Admin cannot modify a Super Admin profile under ANY circumstances
+  // (applies to full_name, phone, department, job_title, role, is_active, organization_id, supervisor_id, etc.)
+  if (isAdmin && !isSelf && targetRole === 'super_admin') {
+    return { allowed: false, error: 'لا يمكن لمدير القطاع تعديل بيانات أو صلاحيات مدير النظام العام.' };
+  }
+
+  // 4. Fail-closed organization boundary: Admin updating another employee
+  // 1. Reject if callerOrgId is missing (null, undefined, or empty)
+  // 2. Reject if targetOrgId is missing (null, undefined, or empty)
+  // 3. Reject if callerOrgId differs from targetOrgId
+  // 4. Allow only when both exist and match.
+  // (Do not apply this restriction to super_admin)
+  if (isAdmin && !isSelf) {
+    const cleanCallerOrg = typeof callerOrgId === 'string' ? callerOrgId.trim() : '';
+    const cleanTargetOrg = typeof targetOrgId === 'string' ? targetOrgId.trim() : '';
+
+    if (!cleanCallerOrg || !cleanTargetOrg || cleanCallerOrg !== cleanTargetOrg) {
+      return { allowed: false, error: 'غير مصرح لمدير القطاع بتعديل موظفين خارج قطاعه التشغيلي.' };
+    }
+  }
+
+  // 5. Role escalation prevention for other employees
   if (updates.role && !canManageRoles(callerRole, updates.role)) {
     return { allowed: false, error: 'ليس لديك الصلاحية لمنح هذه الرتبة (لا يمكن ترقية أو تعديل مدير نظام عام).' };
   }
@@ -320,4 +337,71 @@ export function sanitizeProfileUpdatePayload(
   if (updates.organization_id !== undefined && isSuper) dbPayload.organization_id = updates.organization_id;
 
   return dbPayload;
+}
+
+/**
+ * Evaluates the rollback action and outcome for an employee provisioning request.
+ * Rules:
+ * 1. Only attempts rollback if newlyCreatedAuth === true AND authUserId exists.
+ * 2. If newlyCreatedAuth is false (e.g. preexisting auth user), NEVER attempt deletion! (rollback_performed: false, rollback_failed: false)
+ * 3. If deleteUser succeeds (no error), rollback_performed: true, rollback_failed: false.
+ * 4. If deleteUser fails (error exists), rollback_performed: false, rollback_failed: true.
+ * 5. Server-side log detail is retained for internal telemetry, but NEVER returned to browser.
+ */
+export function evaluateRollbackDecision(params: {
+  newlyCreatedAuth: boolean;
+  authUserId?: string | null;
+  deleteError?: { message: string } | Error | null;
+}): {
+  rollback_performed: boolean;
+  rollback_failed: boolean;
+  server_error_log?: string;
+} {
+  // If the auth user was not created in this current request, never touch it
+  if (!params.newlyCreatedAuth || !params.authUserId) {
+    return {
+      rollback_performed: false,
+      rollback_failed: false,
+    };
+  }
+
+  // If an error occurred during deletion
+  if (params.deleteError) {
+    const rawError = params.deleteError instanceof Error
+      ? params.deleteError.message
+      : String((params.deleteError as any)?.message || params.deleteError);
+    return {
+      rollback_performed: false,
+      rollback_failed: true,
+      server_error_log: rawError,
+    };
+  }
+
+  // Deletion succeeded
+  return {
+    rollback_performed: true,
+    rollback_failed: false,
+  };
+}
+
+/**
+ * Creates safe client response contract for provisioning failures.
+ * Strips any internal error details, returning only safe user message and booleans.
+ */
+export function createSafeProvisioningErrorResponse(params: {
+  clientErrorMessage: string;
+  rollback_performed: boolean;
+  rollback_failed: boolean;
+}): {
+  success: false;
+  error: string;
+  rollback_performed: boolean;
+  rollback_failed: boolean;
+} {
+  return {
+    success: false,
+    error: params.clientErrorMessage,
+    rollback_performed: params.rollback_performed,
+    rollback_failed: params.rollback_failed,
+  };
 }
