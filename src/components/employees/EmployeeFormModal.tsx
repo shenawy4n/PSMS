@@ -127,6 +127,8 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
           let errMessage = res.error || 'تعذر إضافة الموظف الجديد';
           if (res.rollbackPerformed) {
             errMessage = `${errMessage} (تم التراجع عن حساب المصادقة بأمان لمنع أي حسابات معلقة).`;
+          } else if (res.rollbackFailed) {
+            errMessage = `${errMessage} (تنبيه: فشل التراجع التلقائي عن حساب المصادقة؛ يُرجى مراجعة مسؤول المنظومة).`;
           }
           setServerError(errMessage);
           if (errMessage.includes('الرقم الوظيفي')) {

@@ -54,15 +54,64 @@ export function isSupabaseConfigured(): boolean {
 }
 
 /**
+ * Evaluates whether Demo Mode is allowed given environment conditions.
+ * Production Security Rule:
+ * - In production builds (isProd === true), Demo Mode is UNCONDITIONALLY disabled.
+ *   No environment variable (e.g. VITE_ENABLE_DEMO_MODE) can ever override production.
+ * - In local development (isDev === true), Demo Mode is enabled by default unless explicitly disabled.
+ */
+export function evaluateDemoModeAllowed(options: {
+  isProd: boolean;
+  isDev: boolean;
+  viteEnableDemoMode?: string;
+  testOverride?: boolean | null;
+}): boolean {
+  // If explicitly tested in non-production unit tests
+  if (options.testOverride !== undefined && options.testOverride !== null) {
+    if (!options.isProd) {
+      return options.testOverride;
+    }
+  }
+
+  // Production builds unconditionally reject Demo Mode
+  if (options.isProd) {
+    return false;
+  }
+
+  if (options.viteEnableDemoMode === 'false') {
+    return false;
+  }
+  if (options.viteEnableDemoMode === 'true') {
+    return true;
+  }
+  return Boolean(options.isDev);
+}
+
+/**
  * Determines whether Demo Mode is allowed.
  * Production Security Rule:
- * - Production builds (import.meta.env.PROD) must NOT expose Demo Mode or simulated personas
- *   unless explicitly permitted via VITE_ENABLE_DEMO_MODE === 'true'.
+ * - Production builds (import.meta.env.PROD) must NOT expose Demo Mode or simulated personas.
  * - Local development (import.meta.env.DEV) allows Demo Mode for isolated UI prototyping.
  */
 export function isDemoModeAllowed(): boolean {
-  if (memoryStorage.has('psms_enable_demo_mode')) {
+  const isTestEnvironment =
+    (typeof process !== 'undefined' &&
+      process.env &&
+      (process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST))) ||
+    memoryStorage.has('psms_is_test_env');
+
+  // Constrained exclusively to test environments
+  if (isTestEnvironment && memoryStorage.has('psms_enable_demo_mode')) {
     return memoryStorage.get('psms_enable_demo_mode') === 'true';
+  }
+
+  // Production builds unconditionally reject Demo Mode
+  if (import.meta.env.PROD) {
+    return false;
+  }
+
+  if (import.meta.env.VITE_ENABLE_DEMO_MODE === 'false') {
+    return false;
   }
   if (import.meta.env.VITE_ENABLE_DEMO_MODE === 'true') {
     return true;
@@ -76,7 +125,9 @@ export function isDemoModeAllowed(): boolean {
 export function setDemoModeAllowedForTesting(allowed: boolean | null): void {
   if (allowed === null) {
     memoryStorage.delete('psms_enable_demo_mode');
+    memoryStorage.delete('psms_is_test_env');
   } else {
+    memoryStorage.set('psms_is_test_env', 'true');
     memoryStorage.set('psms_enable_demo_mode', String(allowed));
   }
 }

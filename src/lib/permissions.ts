@@ -230,3 +230,94 @@ export function getFaultSeverityInfo(severity: string): { label: string; bg: str
       return { label: severity, bg: 'bg-slate-800', text: 'text-slate-300' };
   }
 }
+
+/**
+ * Validates whether a caller can update an employee's profile
+ */
+export function canUpdateEmployeeProfile(
+  callerRole: UserRole,
+  callerId: string,
+  targetId: string,
+  updates: { role?: UserRole; is_active?: boolean; organization_id?: string | null },
+  callerOrgId?: string | null,
+  targetOrgId?: string | null
+): { allowed: boolean; error?: string } {
+  const isSelf = callerId === targetId;
+  const isSuper = callerRole === 'super_admin';
+  const isAdmin = callerRole === 'admin';
+
+  // Non-admins cannot update other employees
+  if (!isSelf && !isSuper && !isAdmin) {
+    return { allowed: false, error: 'ليس لديك الصلاحية لتعديل بيانات الموظفين الآخرين.' };
+  }
+
+  // Admin cannot operate outside their organization
+  if (isAdmin && callerOrgId && targetOrgId && callerOrgId !== targetOrgId) {
+    return { allowed: false, error: 'غير مصرح لمدير القطاع بتعديل موظفين خارج قطاعه التشغيلي.' };
+  }
+
+  // Self-update security: cannot change own role, active status, or organization
+  if (isSelf) {
+    if (updates.role && updates.role !== callerRole) {
+      return { allowed: false, error: 'غير مصرح بتعديل رتبتك أو صلاحياتك بنفسك.' };
+    }
+    if (updates.is_active === false) {
+      return { allowed: false, error: 'غير مسموح للمستخدم بتعطيل حسابه الشخصي.' };
+    }
+    if (updates.organization_id && updates.organization_id !== callerOrgId) {
+      return { allowed: false, error: 'غير مصرح بتعديل تبعية المؤسسة لحسابك.' };
+    }
+  }
+
+  // Role escalation prevention for other employees
+  if (updates.role && !canManageRoles(callerRole, updates.role)) {
+    return { allowed: false, error: 'ليس لديك الصلاحية لمنح هذه الرتبة (لا يمكن ترقية أو تعديل مدير نظام عام).' };
+  }
+
+  return { allowed: true };
+}
+
+/**
+ * Validates whether a caller can toggle/modify active status of an employee
+ */
+export function canToggleEmployeeStatus(
+  callerRole: UserRole,
+  callerId: string,
+  targetRole: UserRole,
+  targetId: string
+): { allowed: boolean; error?: string } {
+  if (callerId === targetId) {
+    return { allowed: false, error: 'غير مسموح للمستخدم بتعطيل حسابه الشخصي.' };
+  }
+  if (callerRole !== 'super_admin' && callerRole !== 'admin') {
+    return { allowed: false, error: 'ليس لديك الصلاحية لتعديل حالة تفعيل حسابات الموظفين.' };
+  }
+  if (targetRole === 'super_admin' && callerRole !== 'super_admin') {
+    return { allowed: false, error: 'لا يمكن لمدير القطاع تعديل حالة حساب مدير النظام العام.' };
+  }
+  return { allowed: true };
+}
+
+/**
+ * Sanitizes profile update payload strictly to mutable columns of public.profiles
+ * Strips non-column and immutable fields (id, email, employee_number, assigned_station_ids, etc.)
+ */
+export function sanitizeProfileUpdatePayload(
+  updates: Record<string, any>,
+  isSuperOrAdmin: boolean,
+  isSuper: boolean
+): Record<string, any> {
+  const dbPayload: Record<string, any> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (updates.full_name !== undefined) dbPayload.full_name = String(updates.full_name).trim();
+  if (updates.phone !== undefined) dbPayload.phone = updates.phone ? String(updates.phone).trim() : null;
+  if (updates.department !== undefined) dbPayload.department = updates.department ? String(updates.department).trim() : null;
+  if (updates.job_title !== undefined) dbPayload.job_title = updates.job_title ? String(updates.job_title).trim() : null;
+  if (updates.role !== undefined && isSuperOrAdmin) dbPayload.role = updates.role;
+  if (updates.is_active !== undefined && isSuperOrAdmin) dbPayload.is_active = Boolean(updates.is_active);
+  if (updates.supervisor_id !== undefined && isSuperOrAdmin) dbPayload.supervisor_id = updates.supervisor_id;
+  if (updates.organization_id !== undefined && isSuper) dbPayload.organization_id = updates.organization_id;
+
+  return dbPayload;
+}

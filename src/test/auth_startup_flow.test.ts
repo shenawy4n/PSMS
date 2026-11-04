@@ -13,6 +13,7 @@ import {
   setCustomCredentials,
   isDemoModeAllowed,
   setDemoModeAllowedForTesting,
+  evaluateDemoModeAllowed,
 } from '../lib/supabase';
 import { UserProfile } from '../types/database';
 
@@ -229,6 +230,38 @@ describe('PSMS Authentication Startup Flow & Production Guardrails', () => {
     it('returns true for isDemoModeAllowed only when explicitly enabled', () => {
       setDemoModeAllowedForTesting(true);
       expect(isDemoModeAllowed()).toBe(true);
+    });
+
+    it('unconditionally disables demo mode in production regardless of VITE_ENABLE_DEMO_MODE env var', () => {
+      // In production build with VITE_ENABLE_DEMO_MODE='true'
+      const prodWithEnv = evaluateDemoModeAllowed({
+        isProd: true,
+        isDev: false,
+        viteEnableDemoMode: 'true',
+      });
+      expect(prodWithEnv).toBe(false);
+
+      // In production build without env var
+      const prodWithoutEnv = evaluateDemoModeAllowed({
+        isProd: true,
+        isDev: false,
+      });
+      expect(prodWithoutEnv).toBe(false);
+
+      // In development, demo mode is enabled by default or with flag
+      const devDefault = evaluateDemoModeAllowed({
+        isProd: false,
+        isDev: true,
+      });
+      expect(devDefault).toBe(true);
+
+      // In development with explicit disable flag
+      const devDisabled = evaluateDemoModeAllowed({
+        isProd: false,
+        isDev: true,
+        viteEnableDemoMode: 'false',
+      });
+      expect(devDisabled).toBe(false);
     });
 
     it('rejects starting demo mode when demo mode is not allowed', () => {

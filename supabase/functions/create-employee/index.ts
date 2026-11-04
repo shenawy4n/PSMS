@@ -347,11 +347,30 @@ Deno.serve(async (req: Request) => {
     if (rpcError) {
       console.error('RPC provision_employee_profile_and_assignments error:', rpcError);
 
-      // Rollback: delete ONLY the user created in this request
+      // Rollback: delete ONLY the user created in this request and verify actual outcome
+      let rollbackPerformed = false;
+      let rollbackFailed = false;
+      let rollbackErrorDetail: string | undefined;
+
       if (newlyCreatedAuth && authUserId) {
-        await adminClient.auth.admin.deleteUser(authUserId).catch((err: any) => {
-          console.error('Rollback auth user deletion error:', err);
-        });
+        try {
+          const { error: deleteError } = await adminClient.auth.admin.deleteUser(authUserId);
+          if (deleteError) {
+            rollbackFailed = true;
+            rollbackPerformed = false;
+            rollbackErrorDetail = deleteError.message;
+            console.error('Rollback auth user deletion failed:', deleteError);
+          } else {
+            rollbackPerformed = true;
+            rollbackFailed = false;
+            console.info(`Successfully rolled back newly created auth user: ${authUserId}`);
+          }
+        } catch (delEx: any) {
+          rollbackFailed = true;
+          rollbackPerformed = false;
+          rollbackErrorDetail = delEx?.message || 'Unknown rollback exception';
+          console.error('Rollback auth user deletion exception:', delEx);
+        }
       }
 
       // Safe user-friendly Arabic error mapping without leaking internal database schema/code
@@ -374,6 +393,9 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({
           success: false,
           error: clientErrorMessage,
+          rollback_performed: rollbackPerformed,
+          rollback_failed: rollbackFailed,
+          rollback_error_detail: rollbackErrorDetail,
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -389,6 +411,7 @@ Deno.serve(async (req: Request) => {
         user_id: authUserId,
         profile: rpcResult,
         message: successMessage,
+        invite_delivered: inviteDelivered,
       }),
       { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

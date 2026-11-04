@@ -15,7 +15,13 @@ import {
   ConnectionDiagnosticResult,
 } from '../lib/supabase';
 import { formatArabicError } from '../lib/errorHandler';
-import { canCreateEmployee, canManageRoles } from '../lib/permissions';
+import {
+  canCreateEmployee,
+  canManageRoles,
+  canUpdateEmployeeProfile,
+  canToggleEmployeeStatus,
+  sanitizeProfileUpdatePayload,
+} from '../lib/permissions';
 import { validatePasswordStrength } from '../lib/validations/password';
 
 export type AuthSessionStatus =
@@ -45,6 +51,8 @@ export interface CreateEmployeeResult {
   message?: string;
   inviteDelivered?: boolean;
   rollbackPerformed?: boolean;
+  rollbackFailed?: boolean;
+  rollbackErrorDetail?: string;
 }
 
 interface AuthContextType {
@@ -846,7 +854,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return {
           success: false,
           error: data.error,
-          rollbackPerformed: data.rollback_performed ?? Boolean(data.error?.includes('قاعدة البيانات')),
+          rollbackPerformed: data.rollback_performed === true,
+          rollbackFailed: data.rollback_failed === true,
+          rollbackErrorDetail: data.rollback_error_detail,
         };
       }
 
@@ -873,51 +883,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     userId: string,
     updates: Partial<UserProfile>
   ): Promise<{ success: boolean; error?: string }> => {
-    // 1. Authorization checks
+    // 1. Authorization checks using centralized RBAC logic
     if (!currentUser) {
       return { success: false, error: 'يجب تسجيل الدخول لتعديل البيانات.' };
     }
 
-    const isSelf = currentUser.id === userId;
-    const isSuper = role === 'super_admin';
-    const isAdmin = role === 'admin';
+    const targetProfile = profiles.find((p) => p.id === userId);
+    const authCheck = canUpdateEmployeeProfile(
+      role,
+      currentUser.id,
+      userId,
+      {
+        role: updates.role,
+        is_active: updates.is_active,
+        organization_id: updates.organization_id,
+      },
+      currentUser.organization_id,
+      targetProfile?.organization_id
+    );
 
-    // Non-admins cannot update other employees
-    if (!isSelf && !isSuper && !isAdmin) {
-      return { success: false, error: 'ليس لديك الصلاحية لتعديل بيانات الموظفين الآخرين.' };
-    }
-
-    // Role escalation prevention: Admin cannot promote anyone to super_admin
-    if (updates.role && !canManageRoles(role, updates.role)) {
-      return { success: false, error: 'ليس لديك الصلاحية لمنح هذه الرتبة (لا يمكن ترقية أو تعديل مدير نظام عام).' };
-    }
-
-    // Self-update security: cannot change own role, active status, or organization
-    if (isSelf && !isSuper) {
-      if (updates.role && updates.role !== currentUser.role) {
-        return { success: false, error: 'غير مصرح بتعديل رتبتك أو صلاحياتك بنفسك.' };
-      }
-      if (updates.is_active !== undefined && updates.is_active !== currentUser.is_active) {
-        return { success: false, error: 'غير مصرح بتعديل حالة تفعيل حسابك بنفسك.' };
-      }
-      if (updates.organization_id && updates.organization_id !== currentUser.organization_id) {
-        return { success: false, error: 'غير مصرح بتعديل تبعية المؤسسة لحسابك.' };
-      }
+    if (!authCheck.allowed) {
+      return { success: false, error: authCheck.error || 'غير مصرح بتعديل هذا الملف الوظيفي.' };
     }
 
     // 2. Sanitize database payload: filter strictly to actual mutable columns of public.profiles
     // Strips out non-column keys (assigned_station_ids, etc.) and immutable columns (id, email, employee_number)
-    const dbPayload: Record<string, any> = {
-      updated_at: new Date().toISOString(),
-    };
-    if (updates.full_name !== undefined) dbPayload.full_name = updates.full_name.trim();
-    if (updates.phone !== undefined) dbPayload.phone = updates.phone ? updates.phone.trim() : null;
-    if (updates.department !== undefined) dbPayload.department = updates.department ? updates.department.trim() : null;
-    if (updates.job_title !== undefined) dbPayload.job_title = updates.job_title ? updates.job_title.trim() : null;
-    if (updates.role !== undefined && (isSuper || isAdmin)) dbPayload.role = updates.role;
-    if (updates.is_active !== undefined && (isSuper || isAdmin)) dbPayload.is_active = updates.is_active;
-    if (updates.supervisor_id !== undefined && (isSuper || isAdmin)) dbPayload.supervisor_id = updates.supervisor_id;
-    if (updates.organization_id !== undefined && isSuper) dbPayload.organization_id = updates.organization_id;
+    const isSuper = role === 'super_admin';
+    const isAdmin = role === 'admin';
+    const dbPayload = sanitizeProfileUpdatePayload(updates, isSuper || isAdmin, isSuper);
 
     if (isSupabaseMode && !isDemoMode) {
       const client = getSupabase();
@@ -953,17 +946,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const toggleEmployeeActiveStatus = async (
     userId: string
   ): Promise<{ success: boolean; error?: string }> => {
-    if (currentUser?.id === userId) {
-      return { success: false, error: 'غير مسموح للمستخدم بتعطيل حسابه الشخصي.' };
-    }
-    if (role !== 'super_admin' && role !== 'admin') {
-      return { success: false, error: 'ليس لديك الصلاحية لتعديل حالة تفعيل حسابات الموظفين.' };
+    if (!currentUser) {
+      return { success: false, error: 'يجب تسجيل الدخول أولاً.' };
     }
     const target = profiles.find((p) => p.id === userId);
     if (!target) return { success: false, error: 'الموظف غير موجود' };
 
-    if (target.role === 'super_admin' && role !== 'super_admin') {
-      return { success: false, error: 'لا يمكن لمدير القطاع تعديل حالة حساب مدير النظام العام.' };
+    const statusCheck = canToggleEmployeeStatus(role, currentUser.id, target.role, userId);
+    if (!statusCheck.allowed) {
+      return { success: false, error: statusCheck.error };
     }
 
     const newStatus = !target.is_active;

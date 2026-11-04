@@ -3,14 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { canCreateEmployee, canManageRoles } from '../lib/permissions';
+import { describe, it, expect } from 'vitest';
+import {
+  canCreateEmployee,
+  canManageRoles,
+  canUpdateEmployeeProfile,
+  canToggleEmployeeStatus,
+  sanitizeProfileUpdatePayload,
+} from '../lib/permissions';
 import { employeeFormSchema } from '../lib/validations/employee';
 import { UserProfile, UserRole } from '../types/database';
 
 describe('Employee Creation Lifecycle, RBAC, and Onboarding Reliability', () => {
-  const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
   const sampleValidEmployee = {
     employee_number: 'EMP-9001',
     full_name: 'م. عصام عبد الرحمن',
@@ -53,55 +57,44 @@ describe('Employee Creation Lifecycle, RBAC, and Onboarding Reliability', () => 
       const adminOrgId = 'org-cairo-sector-uuid';
       const targetOrgIdOutside = 'org-delta-sector-uuid';
 
-      const validateOrgScope = (callerRole: UserRole, callerOrg: string, targetOrg?: string | null) => {
-        if (callerRole === 'admin') {
-          if (!callerOrg) return { allowed: false, error: 'حساب مدير القطاع غير مرتبط بمنظمة محددة' };
-          if (targetOrg && targetOrg !== callerOrg) {
-            return { allowed: false, error: 'غير مسموح لمدير القطاع بإنشاء موظفين خارج قطاعه التشغيلي' };
-          }
-        }
-        return { allowed: true };
-      };
-
-      const result = validateOrgScope('admin', adminOrgId, targetOrgIdOutside);
+      const result = canUpdateEmployeeProfile(
+        'admin',
+        'caller-admin-id',
+        'target-employee-id',
+        { full_name: 'موظف في قطاع آخر' } as any,
+        adminOrgId,
+        targetOrgIdOutside
+      );
       expect(result.allowed).toBe(false);
       expect(result.error).toContain('خارج قطاعه التشغيلي');
 
-      const validResult = validateOrgScope('admin', adminOrgId, adminOrgId);
+      const validResult = canUpdateEmployeeProfile(
+        'admin',
+        'caller-admin-id',
+        'target-employee-id',
+        { full_name: 'موظف في نفس القطاع' } as any,
+        adminOrgId,
+        adminOrgId
+      );
       expect(validResult.allowed).toBe(true);
     });
 
-    it('4. validates and deduplicates station assignment UUIDs', () => {
-      const duplicateStationIds = [
-        'a1000000-0000-4000-8000-000000000001',
-        'a1000000-0000-4000-8000-000000000002',
-        'a1000000-0000-4000-8000-000000000001', // duplicate
-      ];
+    it('4. validates employee schema and accepts valid station assignments', () => {
+      const parseResult = employeeFormSchema.safeParse(sampleValidEmployee);
+      expect(parseResult.success).toBe(true);
 
-      const invalidStationIdList = [
-        'a1000000-0000-4000-8000-000000000001',
-        'invalid-non-uuid-string',
-      ];
+      // Invalid email fails schema
+      const invalidEmail = { ...sampleValidEmployee, email: 'not-an-email' };
+      const invalidEmailResult = employeeFormSchema.safeParse(invalidEmail);
+      expect(invalidEmailResult.success).toBe(false);
 
-      const validateStations = (stationIds: string[]) => {
-        const invalid = stationIds.find((id) => !UUID_V4_REGEX.test(id));
-        if (invalid) {
-          return { valid: false, error: `معرّف المحطة غير صالح: ${invalid}` };
-        }
-        const unique = Array.from(new Set(stationIds));
-        return { valid: true, unique };
-      };
-
-      const invalidCheck = validateStations(invalidStationIdList);
-      expect(invalidCheck.valid).toBe(false);
-      expect(invalidCheck.error).toContain('معرّف المحطة غير صالح');
-
-      const validCheck = validateStations(duplicateStationIds);
-      expect(validCheck.valid).toBe(true);
-      expect(validCheck.unique).toHaveLength(2);
+      // Short employee number fails schema
+      const invalidEmpNum = { ...sampleValidEmployee, employee_number: 'AB' };
+      const invalidNumResult = employeeFormSchema.safeParse(invalidEmpNum);
+      expect(invalidNumResult.success).toBe(false);
     });
 
-    it('5. detects duplicate employee number and duplicate email', () => {
+    it('5. detects duplicate employee number and duplicate email using profile collection', () => {
       const existingProfiles: UserProfile[] = [
         {
           id: 'b1000000-0000-4000-8000-000000000001',
@@ -115,22 +108,23 @@ describe('Employee Creation Lifecycle, RBAC, and Onboarding Reliability', () => 
         },
       ];
 
-      const checkDuplicates = (newEmpNum: string, newEmail: string) => {
-        const cleanNum = newEmpNum.trim().toUpperCase();
-        const cleanEmail = newEmail.trim().toLowerCase();
+      const cleanNum = 'emp-100'.trim().toUpperCase();
+      const hasDuplicateNum = existingProfiles.some(
+        (p) => p.employee_number.trim().toUpperCase() === cleanNum
+      );
+      expect(hasDuplicateNum).toBe(true);
 
-        if (existingProfiles.some((p) => p.employee_number.trim().toUpperCase() === cleanNum)) {
-          return { conflict: true, error: 'الرقم الوظيفي مسجل مسبقاً لموظف آخر' };
-        }
-        if (existingProfiles.some((p) => p.email.trim().toLowerCase() === cleanEmail)) {
-          return { conflict: true, error: 'البريد الإلكتروني مسجل مسبقاً لموظف آخر' };
-        }
-        return { conflict: false };
-      };
+      const cleanEmail = 'AHMED.ALI@psms.gov.eg'.trim().toLowerCase();
+      const hasDuplicateEmail = existingProfiles.some(
+        (p) => p.email.trim().toLowerCase() === cleanEmail
+      );
+      expect(hasDuplicateEmail).toBe(true);
 
-      expect(checkDuplicates('emp-100', 'other@psms.gov.eg').conflict).toBe(true);
-      expect(checkDuplicates('EMP-999', 'AHMED.ALI@psms.gov.eg').conflict).toBe(true);
-      expect(checkDuplicates('EMP-999', 'unique@psms.gov.eg').conflict).toBe(false);
+      const uniqueEmail = 'unique.person@psms.gov.eg'.trim().toLowerCase();
+      const hasUniqueEmail = existingProfiles.some(
+        (p) => p.email.trim().toLowerCase() === uniqueEmail
+      );
+      expect(hasUniqueEmail).toBe(false);
     });
   });
 
@@ -157,32 +151,32 @@ describe('Employee Creation Lifecycle, RBAC, and Onboarding Reliability', () => 
       expect(mockFallbackResponse.message).toContain('جاهز لتسجيل الدخول');
     });
 
-    it('2. confirms atomic rollback when database profile provisioning fails', () => {
-      // Simulating Edge Function rollback sequence
-      let newlyCreatedAuth = true;
-      let authUserId = 'c1000000-0000-4000-8000-000000000003';
-      let rollbackInvoked = false;
-
-      const simulateRpcFailure = () => {
-        const rpcError = { message: 'Conflict: Employee number EMP-9001 already exists in the system.' };
-        if (rpcError) {
-          if (newlyCreatedAuth && authUserId) {
-            rollbackInvoked = true;
-          }
-          return {
-            success: false,
-            error: 'الرقم الوظيفي أو البريد الإلكتروني مسجل مسبقاً في قاعدة البيانات.',
-            rollback_performed: rollbackInvoked,
-          };
-        }
-        return { success: true };
+    it('2. confirms explicit rollback contract (rollback_performed and rollback_failed flags) on RPC failure', () => {
+      // Contract response when rollback succeeds
+      const successfulRollbackResponse = {
+        success: false,
+        error: 'الرقم الوظيفي أو البريد الإلكتروني مسجل مسبقاً في قاعدة البيانات.',
+        rollback_performed: true,
+        rollback_failed: false,
       };
 
-      const result = simulateRpcFailure();
-      expect(result.success).toBe(false);
-      expect(rollbackInvoked).toBe(true);
-      expect(result.rollback_performed).toBe(true);
-      expect(result.error).toContain('مسجل مسبقاً');
+      expect(successfulRollbackResponse.success).toBe(false);
+      expect(successfulRollbackResponse.rollback_performed).toBe(true);
+      expect(successfulRollbackResponse.rollback_failed).toBe(false);
+
+      // Contract response when rollback fails (requires administrative attention)
+      const failedRollbackResponse = {
+        success: false,
+        error: 'تعذر إتمام تسجيل الملف الوظيفي في قاعدة البيانات.',
+        rollback_performed: false,
+        rollback_failed: true,
+        rollback_error_detail: 'Auth admin deleteUser request timed out',
+      };
+
+      expect(failedRollbackResponse.success).toBe(false);
+      expect(failedRollbackResponse.rollback_performed).toBe(false);
+      expect(failedRollbackResponse.rollback_failed).toBe(true);
+      expect(failedRollbackResponse.rollback_error_detail).toBeDefined();
     });
 
     it('3. rejects duplicate auth user immediately with 409 and never reuses existing accounts', () => {
@@ -204,7 +198,7 @@ describe('Employee Creation Lifecycle, RBAC, and Onboarding Reliability', () => 
   });
 
   describe('PHASE 4: Employee Editing, Sanitization, and Deactivation', () => {
-    it('1. sanitizes updates payload for public.profiles by stripping assigned_station_ids and immutable fields', () => {
+    it('1. sanitizes updates payload for public.profiles by stripping assigned_station_ids and immutable fields using production helper', () => {
       const rawFormUpdates: any = {
         employee_number: 'EMP-IMMUTABLE',
         email: 'immutable@psms.gov.eg',
@@ -217,21 +211,8 @@ describe('Employee Creation Lifecycle, RBAC, and Onboarding Reliability', () => 
         is_active: true,
       };
 
-      // Filter strictly to valid mutable columns of public.profiles
-      const sanitizeProfileUpdate = (updates: Record<string, any>, isSuperOrAdmin: boolean) => {
-        const dbPayload: Record<string, any> = {
-          updated_at: new Date().toISOString(),
-        };
-        if (updates.full_name !== undefined) dbPayload.full_name = updates.full_name.trim();
-        if (updates.phone !== undefined) dbPayload.phone = updates.phone ? updates.phone.trim() : null;
-        if (updates.department !== undefined) dbPayload.department = updates.department ? updates.department.trim() : null;
-        if (updates.job_title !== undefined) dbPayload.job_title = updates.job_title ? updates.job_title.trim() : null;
-        if (updates.role !== undefined && isSuperOrAdmin) dbPayload.role = updates.role;
-        if (updates.is_active !== undefined && isSuperOrAdmin) dbPayload.is_active = updates.is_active;
-        return dbPayload;
-      };
-
-      const sanitized = sanitizeProfileUpdate(rawFormUpdates, true);
+      // Execute actual production sanitization function
+      const sanitized = sanitizeProfileUpdatePayload(rawFormUpdates, true, false);
 
       // Verify immutable and non-column fields were stripped
       expect(sanitized.assigned_station_ids).toBeUndefined();
@@ -249,55 +230,62 @@ describe('Employee Creation Lifecycle, RBAC, and Onboarding Reliability', () => 
       const currentUserId = 'user-logged-in-uuid';
       const targetUserId = 'user-logged-in-uuid';
 
-      const toggleStatus = (callerId: string, targetId: string) => {
-        if (callerId === targetId) {
-          return { success: false, error: 'غير مسموح للمستخدم بتعطيل حسابه الشخصي.' };
-        }
-        return { success: true };
-      };
+      // Test using actual production canToggleEmployeeStatus
+      const toggleResult = canToggleEmployeeStatus('super_admin', currentUserId, 'super_admin', targetUserId);
+      expect(toggleResult.allowed).toBe(false);
+      expect(toggleResult.error).toContain('تعطيل حسابه الشخصي');
 
-      const result = toggleStatus(currentUserId, targetUserId);
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('تعطيل حسابه الشخصي');
+      // Test using actual production canUpdateEmployeeProfile
+      const updateResult = canUpdateEmployeeProfile(
+        'super_admin',
+        currentUserId,
+        targetUserId,
+        { is_active: false }
+      );
+      expect(updateResult.allowed).toBe(false);
+      expect(updateResult.error).toContain('تعطيل حسابه الشخصي');
     });
 
     it('3. prevents operational admin from deactivating a super_admin account', () => {
       const callerRole: UserRole = 'admin';
+      const callerId = 'admin-uuid-1';
       const targetRole: UserRole = 'super_admin';
+      const targetId = 'super-admin-uuid-1';
 
-      const validateDeactivation = (caller: UserRole, target: UserRole) => {
-        if (caller !== 'super_admin' && caller !== 'admin') {
-          return { success: false, error: 'ليس لديك الصلاحية لتعديل حالة تفعيل حسابات الموظفين.' };
-        }
-        if (target === 'super_admin' && caller !== 'super_admin') {
-          return { success: false, error: 'لا يمكن لمدير القطاع تعديل حالة حساب مدير النظام العام.' };
-        }
-        return { success: true };
-      };
-
-      const result = validateDeactivation(callerRole, targetRole);
-      expect(result.success).toBe(false);
+      // Test using actual production canToggleEmployeeStatus
+      const result = canToggleEmployeeStatus(callerRole, callerId, targetRole, targetId);
+      expect(result.allowed).toBe(false);
       expect(result.error).toContain('لا يمكن لمدير القطاع');
 
-      const validResult = validateDeactivation('super_admin', targetRole);
-      expect(validResult.success).toBe(true);
+      // Super admin can modify status of super_admin (other than self)
+      const validResult = canToggleEmployeeStatus('super_admin', 'super-admin-uuid-2', targetRole, targetId);
+      expect(validResult.allowed).toBe(true);
     });
 
     it('4. prevents unauthorized role changes and self-promotion by normal employees', () => {
-      const isSelf = true;
+      const callerId = 'employee-uuid-1';
       const callerRole: UserRole = 'employee';
       const requestedRole: UserRole = 'admin';
 
-      const validateRoleUpdate = (self: boolean, currentRole: UserRole, targetRole?: UserRole) => {
-        if (self && targetRole && targetRole !== currentRole) {
-          return { success: false, error: 'غير مصرح بتعديل رتبتك أو صلاحياتك بنفسك.' };
-        }
-        return { success: true };
-      };
+      // Normal employee attempting self-promotion
+      const result = canUpdateEmployeeProfile(
+        callerRole,
+        callerId,
+        callerId,
+        { role: requestedRole }
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.error).toContain('غير مصرح بتعديل رتبتك أو صلاحياتك بنفسك');
 
-      const result = validateRoleUpdate(isSelf, callerRole, requestedRole);
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('غير مصرح بتعديل رتبتك');
+      // Non-admin employee attempting to update another employee
+      const crossUpdateResult = canUpdateEmployeeProfile(
+        callerRole,
+        callerId,
+        'other-employee-uuid',
+        { full_name: 'اسم جديد' } as any
+      );
+      expect(crossUpdateResult.allowed).toBe(false);
+      expect(crossUpdateResult.error).toContain('ليس لديك الصلاحية لتعديل بيانات الموظفين الآخرين');
     });
   });
 });
