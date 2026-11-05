@@ -1,135 +1,182 @@
 # منظومة إدارة محطات الكهرباء (PSMS)
-## تقرير التحصين الأمني لقاعدة البيانات وسياسات RLS — هجرة برمجية 11
-### التوثيق الهندسي الشامل والتحقق المؤتمت (Database Security Hardening & Fail-Closed Enforcement)
+## تقرير التدقيق الشامل لأمان RLS وعزل المستأجرين — الهجرة البرمجية 12
+### (Migration 12: Complete RLS Audit, Multi-Tenant Isolation & Authorization Hardening)
 
 ---
 
-### 1. الملخص التنفيذي (Executive Summary)
+### A. الملخص التنفيذي (Executive Summary)
 
-تم إنجاز وتجهيز الهجرة البرمجية الحادية عشرة (`supabase/migrations/11_database_security_hardening.sql`) في مستودع مشروع منظومة إدارة محطات الكهرباء (PSMS) بنجاح كامل. 
-تهدف هذه الهجرة إلى سد الثغرات الأمنية المحددة في التدقيق الأمني اللاحق للالتزام `40365d6d97d1ff4c9ed2161893cabdd516fb2883`، وتطبيق مبدأ **الدفاع في العمق (Defense-in-Depth)** عبر نقل وتثبيت قواعد التحقق الأمني ونطاق المؤسسات وعزل المستأجرين (Multi-Tenant Isolation) مباشرةً في طبقة قاعدة بيانات PostgreSQL، دون الاعتماد الحصري على ضوابط الواجهة الأمامية.
+تم إنجاز الهجرة البرمجية رقم 12 (`supabase/migrations/12_complete_rls_multi_tenant_hardening.sql`) وحزمة الاختبارات المتطورة (`src/test/migration_12_rls_and_multi_tenant.test.ts`) ضمن مستودع منظومة إدارة محطات الكهرباء (PSMS) كخطوة حاسمة لتحقيق العزل التام متعدد المستأجرين (Multi-Tenant Isolation) وسد الثغرات المتبقية في كافة الجداول التشغيلية.
 
-تم القضاء التام على ثغرة الفتح عند الفشل (Fail-Open Bypass) الناتجة عن شروط القيمة الفارغة (`OR get_current_user_org_id() IS NULL`)، وتم فرض مبدأ الإغلاق عند الفشل (Fail-Closed) في كافة سياسات RLS والدوال الأمنية ومحفزات الجداول ودوال الإجراءات المخزنة (RPC).
-
----
-
-### 2. الامتثال الصارم لقواعد السلامة (Absolute Safety Restrictions Compliance)
-
-تم تنفيذ هذه المهمة في بيئة المستودع حصراً (STRICT REPOSITORY-ONLY) وفق الضوابط التالية:
-- **صفر أوامر SQL منفذة على خوادم الإنتاج:** لم يتم تنفيذ أي أمر SQL (`ALTER`, `DROP`, `UPDATE`, `INSERT`, `TRUNCATE`, إلخ) على أي مشروع Supabase سحابي أو قاعدة بيانات حية.
-- **عدم تطبيق أو دفع أي Migration:** لم يتم تشغيل `supabase db push` أو `supabase db reset` أو `supabase migration up`.
-- **حظر المساس بالبيانات الإنتاجية:** لم يتم تعديل أو حذف أي سجل تشغيلي، ولم يتم إنشاء أو تعديل مستخدمين في Supabase Auth.
-- **عدم نشر أو تعديل دوال الحافة (Edge Functions):** بقيت دوال الحافة السحابية بدون إعادة نشر.
-- **حماية الأسرار والمفاتيح:** لا يوجد أي كشف أو تضمين لمفاتيح `service_role` أو رموز JWT أو كلمات المرور.
-- **حماية الهجرات السابقة (01 إلى 10):** بقيت كافة ملفات الهجرة السابقة ثابتة ومحمية بالكامل، وأُدرجت التعديلات ضمن ملف هجرة تتابعي جديد ومستقل `11_database_security_hardening.sql`.
+أبرز ما تم إنجازه:
+1. **تحصين دوال الصلاحيات المركزية:** إلزام فحص نشاط الحساب (`is_active = TRUE`) في استخراج الدور والمؤسسة، مما يحرم الحسابات المعطلة أو الملغاة فوراً من استعلام أو تعديل أي بيانات.
+2. **حظر الوصول العابر للمحطات (Cross-Organization Station Bypass Elimination):** إزالة الثغرة الكامنة في `user_has_station_access()` التي كانت تسمح لمدير قطاع بالوصول لمحطات خارج مؤسسته في حال وجود إسناد شاذ في جدول `station_assignments`.
+3. **تحصين الجداول التشغيلية:** استبدال وتطهير السياسات الفضفاضة في جداول `station_assets`, `maintenance_orders`, `station_readings`, `fault_reports`, `inspection_records`, `tasks`, `notifications`, `audit_logs`, `permits_to_work`, و `insulation_tests` باشتراط `station_belongs_to_user_org`، وإلزام مطابقة شرط `WITH CHECK` مع `USING` لمنع هجمات نقل الأصول وتغيير معرفات المحطات (Station-Hopping Attacks).
+4. **حماية سجلات التدقيق:** حظر تام لأي سياسة `UPDATE` أو `DELETE` على جدول `audit_logs` لضمان عدم قابليتها للتعديل قطيعاً (Immutability).
 
 ---
 
-### 3. تحليل الأسباب الجذرية ونموذج التهديد (Root Cause & Threat Model Analysis)
+### B. جدول جرد السياسات الشامل: قبل وبعد Migration 12 (Complete RLS Inventory)
 
-| رقم الثغرة | الموضع في Migration 09 | السلوك السابق (Vulnerability) | الأثر الأمني ونموذج التهديد (Threat Model) | الحل المطبق في Migration 11 |
-|:---|:---|:---|:---|:---|
-| **VULN-01** | `Admins can update profiles` (سطر 738) | كان الشرط يحتوي على `OR public.get_current_user_org_id() IS NULL` | **تجاوز نطاق المؤسسة (Org Scope Bypass):** أي حساب إداري غير مربوط بمؤسسة (`NULL`) كان يمنحه شرط RLS صلاحية تعديل كافة ملفات الموظفين في قاعدة البيانات دون استثناء. | **إلغاء تام لشرط NULL** وفرض اشتراط أن يكون معرف المؤسسة للإداري والموظف غير فارغ (`NOT NULL`) ومتطابقين. |
-| **VULN-02** | `Profiles viewable by authorized users` (سطر 722) | احتواء السياسة على `OR public.is_admin_or_super()` بشكل عام | **تسريب بيانات الموظفين (Cross-Tenant Data Leakage):** يتيح لأي إداري قطاع قراءة جميع الملفات الوظيفية وأرقام الهواتف والبريد الإلكتروني للقطاعات والمؤسسات الأخرى. | حصر صلاحية القراءة لمدير القطاع بموظفي قطاعه فقط (`organization_id = get_current_user_org_id()`)، مع احتفاظ مدير النظام العام (Super Admin) بالرؤية الشاملة. |
-| **VULN-03** | Trigger `enforce_profile_update_security` (سطر 338) | `IF v_current_org_id IS NOT NULL THEN` يفحص المؤسسة فقط إذا كانت موجودة | **تجاوز القيود التحفيزية:** إذا كان حساب الإداري بقيمة فارغة لمؤسسته، كان المحفز يتجاوز فحص المؤسسة ويسمح بالتعديل، كما لم يكن يفحص نشاط الحساب المنفذ. | فرض فحص النشاط (`is_active = TRUE`)، وحظر فوري إذا كان `v_current_org_id IS NULL` أو `OLD.organization_id IS NULL` أو اختلفا، ومنع تعديل حسابات مدراء النظام العام. |
-| **VULN-04** | `Admins can manage stations` (سطر 776) | سياسة عامة `FOR ALL` تعتمد فقط على `is_admin_or_super()` | **إدارة وتعديل وحذف محطات غير تابعة للقطاع:** يستطيع إداري أي قطاع تعديل بيانات محطات مركزية أو تابعة لقطاعات أخرى أو حذفها. | إلغاء السياسة العامة، وتقسيمها إلى: إدارة شاملة لـ Super Admin، وإدراج/تحديث مقتصر على محطات نفس المؤسسة لإداري القطاع، وحظر الحذف كلياً على غير Super Admin. |
-| **VULN-05** | `Station assignments` (سطر 800، 811) | عدم التحقق من تبعية المحطة لمؤسسة الإداري في INSERT و UPDATE | **إسناد عشوائي عبر القطاعات:** يستطيع الإداري إسناد موظفين لمحطات تتبع مؤسسات أخرى. | فرض شرط `station_belongs_to_user_org(station_id)` لمدراء القطاعات. |
-| **VULN-06** | RPC `provision_employee_profile_and_assignments` (سطر 569) | `IF v_admin_org_id IS NOT NULL THEN` يتجاوز فحص المؤسسة عند كونه فارغاً | **تزويد موظفين خارج النطاق:** إمكانية إنشاء موظفين بمؤسسات أخرى إذا كان الإداري غير مقيد بمؤسسة. | فرض فحص مغلق (Fail-Closed): إلقاء استثناء فوري `RAISE EXCEPTION` إذا كان `v_admin_org_id IS NULL`. |
-
----
-
-### 4. جدول جرد السياسات الشامل (Policy Inventory: Before vs After Migration 11)
-
-| الجدول / الكائن | العملية (Action) | اسم السياسة / الدالة | الحالة قبل Migration 11 (Migration 09) | الحالة بعد Migration 11 | حالة الانغلاق عند الفشل (Fail-Closed) |
-|:---|:---|:---|:---|:---|:---:|
-| `public.profiles` | `SELECT` | `Profiles viewable by authorized users` | فضفاضة: تتيح لأي إداري قراءة كافة الملفات عبر `is_admin_or_super()` | محصنة: مقصورة على الذات، Super Admin، زملاء المحطة المشتركة، أو إداري نفس المؤسسة غير الفارغة | **محصن ومغلق** |
-| `public.profiles` | `UPDATE` | `Admins can update profiles` | ثغرة خطيرة: تسمح بالتعديل الشامل إذا كان `get_current_user_org_id() IS NULL` | محصنة: تتطلب تطابق المؤسسة غير الفارغة، وتمنع تعديل حساب Super Admin قطيعاً على مستوى RLS | **محصن ومغلق** |
-| `public.profiles` | `BEFORE UPDATE` | المحفز `trg_enforce_profile_update_security` | ثغرة تجاوز: تتخطى الفحص عند فراغ مؤسسة الإداري | محصنة: فحص نشاط الحساب، حظر التعديل عند فراغ المؤسسة، حظر تعديل Super Admin، حظر الترقية لـ Super Admin | **محصن ومغلق** |
-| `public.profiles` | `BEFORE INSERT` | المحفز `trg_enforce_profile_insert_security` | لا تتحقق من نطاق مؤسسة الإداري المباشر | محصنة: إلزام إداري القطاع بأن تكون مؤسسته والمؤسسة المسندة متطابقتين وغير فارغتين | **محصن ومغلق** |
-| `public.stations` | `ALL / UPDATE / INSERT` | `Admins can manage stations` | فضفاضة: صلاحية إدارة شاملة لكافة المحطات لأي إداري قطاع | ألغيت واستبدلت بسياسات مخصصة تقتصر على محطات مؤسسة الإداري | **محصن ومغلق** |
-| `public.stations` | `DELETE` | `Super admins can delete stations` | سياسة حذف مشتركة | حصرية قطيعاً لمدير النظام العام `public.is_super_admin()` | **محصن ومغلق** |
-| `public.station_assignments` | `SELECT` | `Station assignments viewable by authorized users` | تسمح لأي إداري بعرض إسنادات كل المؤسسات | مقصورة على الذات، Super Admin، إسنادات محطات نفس المؤسسة، أو المحطات المسندة | **محصن ومغلق** |
-| `public.station_assignments` | `INSERT / UPDATE` | `Station assignments insertable/updatable` | تفتقر لشرط تبعية المحطة لمؤسسة الإداري | تشترط `station_belongs_to_user_org(station_id)` لمدراء القطاعات | **محصن ومغلق** |
-| Database Function | `EXECUTE` | `public.user_has_station_access` | تعيد `TRUE` لأي إداري قطاع إذا كانت مؤسسته فارغة | تعيد `TRUE` لإداري القطاع فقط للمحطات التابعة لمؤسسته أو المسندة له صراحةً | **محصن ومغلق** |
-| Database RPC | `EXECUTE` | `provision_employee_profile_and_assignments` | تسمح للإداري ذو المؤسسة الفارغة بتجاوز نطاق المؤسسة والمحطات | ترفض الإداري فوراً وتلقي استثناء عند فراغ المؤسسة أو محاولة تجاوزها | **محصن ومغلق** |
-
----
-
-### 5. ملفات الهجرة والاختبارات المطورة (Implemented Files)
-
-1. **`supabase/migrations/11_database_security_hardening.sql`**:
-   - ملف هجرة متكامل، متوافق مع معايير PostgreSQL و Supabase.
-   - يتضمن تعليقات تفصيلية باللغة العربية توضح كل تحصين أمني.
-   - يعيد بناء الدوال والمحفزات والسياسات بصيغة قطعية (`CREATE OR REPLACE`, `DROP POLICY IF EXISTS`).
-
-2. **`src/test/migration_11_authorization_hardening.test.ts`**:
-   - حزمة اختبارات مؤتمتة متقدمة تغطي:
-     * التحقق الساكن (Static SQL Assertions) من خلو ملف الهجرة تماماً من أي شرط `IS NULL OR`.
-     * التحقق من وجود كافة سياسات الإغلاق عند الفشل (Fail-Closed).
-     * التحقق من دوال الصلاحيات في الواجهة الأمامية ومطابقتها التامة لقواعد قاعدة البيانات.
-     * مصفوفة فحص جرد السياسات قبل وبعد الهجرة.
+| الجدول | العملية | السياسة السابقة (Active pre-12) | السياسة بعد Migration 12 | حالة العزل والتأمين |
+|:---|:---|:---|:---|:---:|
+| `public.station_assets` | `SELECT` | `user_has_station_access(station_id)` | `user_has_station_access(station_id)` (محصنة) | محصن |
+| `public.station_assets` | `INSERT` | `is_admin_or_super() OR ...` (فضفاضة) | `is_super_admin() OR (is_admin_or_super() AND station_belongs_to_user_org(station_id)) OR supervisor` | محصن بمطابقة المؤسسة |
+| `public.station_assets` | `UPDATE` | `is_admin_or_super() OR ...` (فضفاضة) | شرط متطابق في `USING` و `WITH CHECK` يمنع تغيير المحطة لمؤسسة أخرى | محصن ضد Station-Hopping |
+| `public.station_assets` | `DELETE` | `is_super_admin()` | `is_super_admin()` (حصري للسوبر أدمن) | محصن |
+| `public.maintenance_orders` | `SELECT` | `user_has_station_access(station_id)` | `user_has_station_access(station_id)` (محصنة) | محصن |
+| `public.maintenance_orders` | `INSERT` | `is_admin_or_super() OR ...` (فضفاضة) | `is_super_admin() OR (is_admin_or_super() AND station_belongs_to_user_org(station_id)) OR supervisor` | محصن بمطابقة المؤسسة |
+| `public.maintenance_orders` | `UPDATE` | `is_admin_or_super() OR ...` | اشتراط `station_belongs_to_user_org(station_id)` في `USING` و `WITH CHECK` | محصن |
+| `public.maintenance_orders` | `DELETE` | `is_super_admin()` | `is_super_admin()` | محصن |
+| `public.station_readings` | `SELECT` | `user_has_station_access(station_id)` | `user_has_station_access(station_id)` | محصن |
+| `public.station_readings` | `INSERT` | `user_has_station_access(station_id) AND recorded_by = auth.uid()` | كما هي (سليمة ومحصنة) | محصن |
+| `public.station_readings` | `UPDATE` | `is_admin_or_super() OR supervisor` (تفتقر لشرط المحطة) | اشتراط `station_belongs_to_user_org(station_id)` في `USING` و `WITH CHECK` | محصن |
+| `public.station_readings` | `DELETE` | `is_super_admin()` | `is_super_admin()` | محصن |
+| `public.fault_reports` | `SELECT` | `user_has_station_access(station_id)` | `user_has_station_access(station_id)` | محصن |
+| `public.fault_reports` | `INSERT` | `user_has_station_access(station_id) AND reported_by = auth.uid()` | كما هي (سليمة ومحصنة) | محصن |
+| `public.fault_reports` | `UPDATE` | تعتمد على دالة الوصول القديمة | اشتراط `station_belongs_to_user_org(station_id)` للإداري ومطابقة `WITH CHECK` | محصن |
+| `public.fault_reports` | `DELETE` | `is_super_admin()` | `is_super_admin()` | محصن |
+| `public.inspection_records`| `SELECT` | `user_has_station_access(station_id)` | `user_has_station_access(station_id)` | محصن |
+| `public.inspection_records`| `INSERT` | `user_has_station_access(station_id) AND inspector_id = auth.uid()` | كما هي | محصن |
+| `public.inspection_records`| `UPDATE` | `is_admin_or_super() OR supervisor` (تفتقر لـ WITH CHECK) | اشتراط `station_belongs_to_user_org(station_id)` وإلزام `WITH CHECK` | محصن |
+| `public.inspection_records`| `DELETE` | `is_super_admin()` | `is_super_admin()` | محصن |
+| `public.tasks` | `SELECT` | `assigned_to = auth.uid() OR is_admin_or_super() OR ...` (تسريب مهام) | حصر الإداري بمهام محطات قطاعه: `station_belongs_to_user_org(station_id)` | محصن ضد التسريب |
+| `public.tasks` | `INSERT` | `is_admin_or_super() OR supervisor` | قصر الإدراج على محطات نفس المؤسسة أو المهام الشخصية | محصن |
+| `public.tasks` | `UPDATE` | `assigned_to = auth.uid() OR is_admin_or_super() OR ...` | إلزام الإداري بمحطات قطاعه أو المهام التي أنشأها بنفسه | محصن |
+| `public.tasks` | `DELETE` | `is_super_admin()` | `is_super_admin()` | محصن |
+| `public.notifications` | `SELECT` | `user_id = auth.uid()` | `user_id = auth.uid()` | محصن (User-Owned) |
+| `public.notifications` | `INSERT` | `is_admin_or_super() OR user_id = auth.uid()` (سبام عابر) | اشتراط `profile_belongs_to_user_org(user_id)` للإداري | محصن بمطابقة المؤسسة |
+| `public.notifications` | `UPDATE` | `user_id = auth.uid()` | `user_id = auth.uid()` | محصن |
+| `public.notifications` | `DELETE` | `user_id = auth.uid() OR is_super_admin()` | `user_id = auth.uid() OR is_super_admin()` | محصن |
+| `public.audit_logs` | `SELECT` | `is_admin_or_super()` (تسريب شامل لسجلات كل القطاعات) | قصر الإداري على عملياته ومحطات قطاعه: `station_belongs_to_user_org` | محصن ضد التسريب |
+| `public.audit_logs` | `INSERT` | `actor_id = auth.uid() OR actor_id IS NULL` | كما هي للمحفزات والنظام | محصن |
+| `public.audit_logs` | `UPDATE/DELETE` | لا توجد | تأكيد قطعي بعدم وجود أي سياسة تعديل أو حذف إطلاقاً | سجلات غير قابلة للتغيير |
+| `public.permits_to_work` | `ALL/UPDATE` | كانت تفتقر لشرط تبعية المحطة لمؤسسة الإداري | قصر صلاحية الإداري على `station_belongs_to_user_org(station_id)` | محصن |
+| `public.insulation_tests` | `UPDATE` | تفتقر لشرط `WITH CHECK` | إضافة `WITH CHECK` وإلزام `station_belongs_to_user_org(station_id)` | محصن |
 
 ---
 
-### 6. نتائج التحقق المؤتمت (Automated Test Execution Results)
+### C. قائمة الملفات المعدلة والمضافة (Changes List)
 
-تم تشغيل حزم الاختبارات بالكامل عبر `vitest` وأسفرت عن الآتي:
+1. **الملفات المضافة (New Files):**
+   - `supabase/migrations/12_complete_rls_multi_tenant_hardening.sql`: ملف هجرة SQL يضم التحصينات الشاملة للسياسات والدوال.
+   - `src/test/migration_12_rls_and_multi_tenant.test.ts`: ملف اختبارات Vitest مؤتمت يحاكي تدقيق السياسات والعزل متعدد المستأجرين.
+   - `scripts/audit_policies.cjs`: أداة تدقيق وتحليل ساكن تتبع تطور وسياسات RLS عبر تاريخ الهجرات من 01 إلى 12.
+2. **الملفات المحفوظة والمحمية:**
+   - بقيت الهجرات من `01_initial_schema.sql` إلى `11_database_security_hardening.sql` كما هي بدون أي تعديل تاريخي حفاظاً على سلامة التتبع الزمني.
+
+---
+
+### D. تفاصيل الهجرة 12 (Migration 12 Purpose & Core Changes)
+
+1. **إلغاء ثغرة الوصول العابر للمحطات (user_has_station_access):**
+   - في الهجرة 11، كانت الدالة تعيد `RETURN public.user_has_station_assignment(station_uuid);` كاحتياط في نهاية فحص الإداري.
+   - في الهجرة 12، تم حظر هذا التجاوز نهائياً: الإداري لا يصل إلا لمحطات مؤسسته المحددة حصراً (`organization_id = v_user_org`). إذا حاول الوصول لمحطة قطاع آخر، تعيد الدالة `FALSE` فوراً حتى لو كان هناك سجل إسناد شاذ في `station_assignments`.
+2. **عزل الحسابات المعطلة في دوال الأدوار:**
+   - تحديث `get_current_user_role()` و `get_current_user_org_id()` بإضافة `AND is_active = TRUE`.
+   - بمجرد تعطيل الموظف أو المشرف، تعيد هذه الدوال `NULL` فوراً، مما يعطل كافة الصلاحيات بدون انتظار انتهاء صلاحية JWT.
+3. **منع هجمات قفز المحطات (Station-Hopping Attacks):**
+   - إلزام كل سياسة `UPDATE` بوجود شرط `WITH CHECK` متطابق تماماً مع شرط `USING`، مما يمنع أي مستخدم أو مشرف من تغيير معرّف المحطة (`station_id`) لنقل السجل لمحطة خارج صلاحياته.
+
+---
+
+### E. فحص دوال التحقق الأمنية (Helper Functions Review)
+
+| اسم الدالة | نوع الأمان (Security) | التعديل في Migration 12 | الأثر الأمني |
+|:---|:---|:---|:---|
+| `get_current_user_role()` | `SECURITY DEFINER`, search_path = public, pg_temp | إضافة `AND is_active = TRUE` | الحساب المعطل لا يحصل على أي رتبة |
+| `get_current_user_org_id()` | `SECURITY DEFINER`, search_path = public, pg_temp | إضافة `AND is_active = TRUE` | الحساب المعطل لا يحصل على أي مؤسسة |
+| `is_super_admin()` | `SECURITY DEFINER`, search_path = public, pg_temp | تعتمد على دالة الدور المحصنة | تعيد `FALSE` فوراً للحساب المعطل |
+| `is_admin_or_super()` | `SECURITY DEFINER`, search_path = public, pg_temp | تعتمد على دالة الدور المحصنة | تعيد `FALSE` فوراً للحساب المعطل |
+| `user_has_station_access(UUID)` | `SECURITY DEFINER`, search_path = public, pg_temp | حظر الإداري ذو المؤسسة الفارغة، وحظر تجاوز حدود المؤسسة عبر جدول الإسنادات | عزل تام للمحطات ومنع الوصول العابر |
+| `station_belongs_to_user_org(UUID)` | `SECURITY DEFINER`, search_path = public, pg_temp | اشتراط `public.get_current_user_org_id() IS NOT NULL` | إغلاق عند الفشل (Fail-Closed) |
+| `profile_belongs_to_user_org(UUID)` | `SECURITY DEFINER`, search_path = public, pg_temp | اشتراط عدم كون المؤسسة فارغة، ومنع استهداف Super Admin | حماية المشرفين وعزل القطاعات |
+
+---
+
+### F. مراجعة دوال الحافة والإجراءات المخزنة (RPC & Edge Functions Review)
+
+1. **دالة الحافة `supabase/functions/create-employee/index.ts`:**
+   - تم التحقق من أنها تفحص هوية المتصل عبر JWT خادمياً (`callerClient.auth.getUser()`).
+   - تشترط نشاط حساب الإداري (`callerProfile.is_active`).
+   - تمنع مدراء القطاعات من إنشاء حسابات `super_admin`.
+   - تلزم مدير القطاع بأن تكون مؤسسة الموظف الجديد مطابقة لمؤسسته.
+   - تقوم بالتراجع الذري (Atomic Rollback) بحذف حساب Auth المؤقت فقط إذا فشل استدعاء قاعدة البيانات.
+2. **الإجراء المخزن `provision_employee_profile_and_assignments`:**
+   - محصور حصرياً بـ `service_role` و `postgres` مع إلغاء كافة الصلاحيات من `PUBLIC` و `authenticated` و `anon`.
+   - يفحص نشاط حساب الإداري المنفذ (`is_active = TRUE`).
+   - يمنع تصعيد الصلاحيات وإسناد محطات من خارج المؤسسة.
+
+---
+
+### G. الاختبارات المؤتمتة ونتائجها الفعلية (Tests & Actual Results)
+
+تم تشغيل حزمة اختبارات المشروع كاملة (17 ملفاً، 234 اختباراً) عبر Vitest، وجاءت النتيجة كالآتي:
 
 ```text
-✓ src/test/migration_11_authorization_hardening.test.ts (18 tests) - 22ms
-✓ src/test/centralized_architecture_and_auth.test.ts   (27 tests) - 150ms
-✓ src/test/employee_creation_and_auth.test.ts          (21 tests) - 28ms
-✓ src/test/employee_lifecycle_and_rbac.test.ts         (17 tests) - 15ms
-✓ src/test/password_management.test.ts                 (20 tests) - 19ms
-✓ src/test/production_readiness_patch.test.ts          (15 tests) - 17ms
-✓ src/test/phase2_operations.test.ts                   (13 tests) - 16ms
-✓ src/test/station_update_and_region.test.ts           (8 tests)  - 13ms
-✓ src/test/fault_and_reading_operations.test.ts         (7 tests)  - 15ms
-✓ src/test/validations.test.ts                         (6 tests)  - 12ms
-✓ src/test/auth_startup_flow.test.ts                   (13 tests) - 13ms
-✓ src/test/maintenance_and_ptw.test.ts                 (9 tests)  - 13ms
-✓ src/test/permissions.test.ts                         (12 tests) - 13ms
-✓ src/test/connection_and_responsive_audit.test.ts     (13 tests) - 10ms
-✓ src/test/phase3_station_admin_hardening.test.ts      (6 tests)  - 11ms
-✓ src/test/super_admin_auth.test.ts                    (8 tests)  - 12ms
+✓ src/test/centralized_architecture_and_auth.test.ts  (27 tests) - 156ms
+✓ src/test/migration_12_rls_and_multi_tenant.test.ts  (21 tests) - 21ms
+✓ src/test/employee_creation_and_auth.test.ts         (21 tests) - 25ms
+✓ src/test/migration_11_authorization_hardening.test.ts (18 tests) - 16ms
+✓ src/test/password_management.test.ts                (20 tests) - 20ms
+✓ src/test/production_readiness_patch.test.ts         (15 tests) - 15ms
+✓ src/test/phase2_operations.test.ts                  (13 tests) - 20ms
+✓ src/test/fault_and_reading_operations.test.ts        (7 tests)  - 14ms
+✓ src/test/employee_lifecycle_and_rbac.test.ts        (17 tests) - 14ms
+✓ src/test/station_update_and_region.test.ts          (8 tests)  - 14ms
+✓ src/test/permissions.test.ts                        (12 tests) - 11ms
+✓ src/test/maintenance_and_ptw.test.ts                (9 tests)  - 11ms
+✓ src/test/auth_startup_flow.test.ts                  (13 tests) - 11ms
+✓ src/test/validations.test.ts                        (6 tests)  - 12ms
+✓ src/test/super_admin_auth.test.ts                   (8 tests)  - 7ms
+✓ src/test/phase3_station_admin_hardening.test.ts     (6 tests)  - 10ms
+✓ src/test/connection_and_responsive_audit.test.ts    (13 tests) - 11ms
 
-Test Files:  16 passed (16)
-Tests:       213 passed (213)
-Duration:    5.06s
-Lint Status: Passed (tsc --noEmit: 0 errors)
-Build Status: Succeeded (vite build: 0 errors)
+Test Files:  17 passed (17)
+Tests:       234 passed (234)
+Duration:    5.40s
+Lint:        $ tsc --noEmit (0 errors)
+Build:       vite build (Succeeded in 3.65s)
 ```
 
 ---
 
-### 7. التمييز الصريح بين أنواع الاختبارات (Test Categorization & Zero-Live Declaration)
+### H. المخاطر المتبقية والافتراضات غير المتحقق منها (Remaining Risks)
 
-- **الاختبارات التحليلية الساكنة (Static Code & AST Analysis):** تم فحص بنية جمل SQL ومصفوفات RLS والتأكد من مطابقة الكود لمحددات الأمان.
-- **اختبارات الوحدات السلوكية (Unit & Behavioral Tests):** تم اختبار دوال الصلاحيات (`canUpdateEmployeeProfile`, `canToggleEmployeeStatus`, `canDeleteStation`, `sanitizeProfileUpdatePayload`, إلخ) على جميع سيناريوهات الإدخال والقيم الفارغة وحالات التعدي عبر المؤسسات.
-- **الاختبارات الحية على قاعدة البيانات (Live Integration Tests):** **0 اختبارات حية**. نعلن صراحةً وبشكل قاطع أنه لم يتم إجراء أي اختبار حي يتصل بقاعدة البيانات الإنتاجية أو يرسل طلبات إليها، التزاماً بقواعد السلامة الصارمة.
-
----
-
-### 8. الإجراءات القياسية لتطبيق الهجرة في الإنتاج (Production Rollout SOP)
-
-عند الحصول على الموافقة الإدارية الرسمية لتطبيق Migration 11 في بيئة الإنتاج، يجب اتباع الخطوات التالية:
-
-1. **النسخ الاحتياطي (Pre-Migration Backup):**
-   - أخذ نسخة احتياطية فورية وشاملة (Full WAL Snapshot & Schema Backup) لقاعدة البيانات من لوحة تحكم Supabase.
-2. **فحص الجاهزية (Dry-Run):**
-   - تطبيق ملف الهجرة `11_database_security_hardening.sql` أولاً على بيئة الاختبار المتماثلة (Staging Branch).
-   - التحقق من عدم تعطل استعلامات القراءة لمدراء القطاعات الحاليين (عبر التأكد المسبق من أن كل إداري قطاع نشط في الإنتاج لديه `organization_id` غير فارغ ومسند بشكل سليم).
-3. **التطبيق الإنتاجي الذري:**
-   - تنفيذ محتويات `11_database_security_hardening.sql` كمعاملة ذرية واحدة (`BEGIN ... COMMIT`).
-4. **التدقيق اللاحق (Post-Migration Verification):**
-   - اختبار تسجيل دخول ممثل لكل دور (`super_admin`, `admin`, `supervisor`, `employee`).
-   - التأكد من قدرة إداري القطاع على رؤية وإدارة موظفي قطاعه فقط، ومنع رؤيته لموظفي القطاعات الأخرى.
+1. **انعدام بيئة PostgreSQL محلية حية (No Live Local Database):**
+   - جرى التحقق واختبار السلوكيات عبر التحليل الساكن الصارم لملفات SQL ونماذج المحاكاة السلوكية المعتمدة على Vitest و TypeScript.
+   - لم يتم تنفيذ هجرة Migration 12 على محرك PostgreSQL حقيقي متصل بمستأجر متعدد، ولذلك يجب إجراء Dry-run في بيئة Staging قبل الإنتاج.
+2. **سجلات الإسناد الشاذة القديمة (Legacy Out-of-Org Assignments):**
+   - في حال وجود بيانات سابقة في الإنتاج تحتوي على إسنادات غير متطابقة مع مؤسسة الإداري، فإن Migration 12 ستمنع وصول الإداري لتلك المحطات تطبيقاً لمبدأ العزل. يجب مراجعة جدول `station_assignments` للتأكد من تنظيف أي بيانات شاذة قبل النشر.
 
 ---
 
-### 9. الحكم الأمني النهائي الصريح (Explicit Security Verdict)
+### I. التأكيد الصارم لسلامة الإنتاج (Production Safety Declaration)
 
-بناءً على نتائج التدقيق الهندسي، والقضاء الكامل على ثغرات الفتح عند الفشل، وتحصين سياسات RLS والمحفزات ودوال RPC، وتطابق الفحوصات في الطبقات كافة مع نجاح 213 اختباراً مؤتمتاً بنسبة 100%:
+نؤكد بشكل قاطع والتزاماً مطلقاً بضوابط السلامة:
+- **لم يتم تنفيذ أي أمر SQL على بيئة الإنتاج أو مشروع Supabase `gygksvqqqtjqgcnwfjha`.**
+- **لم يتم تطبيق أو دفع أي Migration على السحابة.**
+- **لم يتم تعديل أو حذف أي سجل تشغيلي في الإنتاج.**
+- **لم يتم تعديل أو إنشاء أو تعطيل أي حساب في Supabase Auth الإنتاجي.**
+- **لم يتم نشر أو استدعاء دوال الحافة السحابية (Edge Functions).**
 
-# الحكم الأمني: معتمد ومحصن بالكامل — PASS
-**(VERDICT: PASS — ALL DATABASE BOUNDARIES HARDENED & FAIL-CLOSED ENFORCED)**
+---
+
+### J. معلومات التسليم البرمجي (Git Delivery Details)
+
+- **بيئة العمل:** المستودع المحلي للمشروع.
+- **الملفات المضافة:**
+  - `supabase/migrations/12_complete_rls_multi_tenant_hardening.sql`
+  - `src/test/migration_12_rls_and_multi_tenant.test.ts`
+  - `scripts/audit_policies.cjs`
+- **حالة الاختبارات:** 17 ملف اختبار ناجح بنسبة 100% (234 اختباراً ناجحاً).
+- **حالة البناء:** `tsc --noEmit` سليم، و `vite build` ناجح 100%.
+
+---
+
+### K. الحكم الأمني النهائي (Final Verdict)
+
+# الحكم الأمني: معتمد مع مخاطر غير محققة وقت التشغيل
+### (PASS WITH UNRESOLVED RISKS)
+
+**سبب الحكم:** تم سد وتحصين جميع حدود الأمان في قاعدة البيانات والجداول التشغيلية ودوال الصلاحيات ومطابقة الاختبارات بنسبة 100%، ولكن نظراً لأن الاختبارات تمت برمجياً عبر التحليل الساكن والمحاكاة دون توفر بيئة PostgreSQL حية معزولة لاختبار RLS وقت التشغيل الحقيقي (Runtime)، فإن التأكيد النهائي يتطلب إجراء اختبار القبول على بيئة Staging متصلة بمحرك قاعدة بيانات حقيقي قبل التطبيق في الإنتاج.
